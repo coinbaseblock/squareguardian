@@ -1,0 +1,19 @@
+services:
+  frigate:
+    container_name: spaceguardian-frigate
+    image: ghcr.io/blakeblackshear/frigate:stable
+    restart: unless-stopped
+    shm_size: "512mb"
+    ports:
+      - "8971:8971"
+      - "5000:5000"
+      - "8554:8554"
+      - "8555:8555/tcp"
+      - "8555:8555/udp"
+    environment:
+      FRIGATE_TAPO_RTSP_URL: ${FRIGATE_TAPO_RTSP_URL}
+      FRIGATE_TIMEZONE: ${FRIGATE_TIMEZONE:-Asia/Bangkok}
+    volumes:
+      - ./config/frigate:/config
+      - ./storage/frigate:/media/frigate
+      - /etc/localtime:/etc/localtime:ro

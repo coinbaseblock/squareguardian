@@ -1,0 +1,50 @@
+mqtt:
+  enabled: false
+
+birdseye:
+  enabled: true
+
+record:
+  enabled: false
+
+snapshots:
+  enabled: true
+  retain:
+    default: 7
+
+objects:
+  track:
+    - person
+    - car
+    - motorcycle
+    - bus
+    - truck
+
+detectors:
+  cpu1:
+    type: cpu
+
+cameras:
+  tapo_front:
+    enabled: true
+    detect:
+      enabled: true
+      width: 1280
+      height: 720
+      fps: 5
+    ffmpeg:
+      inputs:
+        - path: "{FRIGATE_TAPO_RTSP_URL}"
+          roles:
+            - detect
+    motion:
+      mask:
+        - 0,0,1,0,1,0.06,0,0.06
+    zones:
+      front_door:
+        coordinates: 0.05,0.95,0.38,0.95,0.38,0.40,0.05,0.40
+        inertia: 3
+        loitering_time: 0
+    snapshots:
+      required_zones:
+        - front_door
