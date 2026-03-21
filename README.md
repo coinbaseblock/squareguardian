@@ -1,4 +1,4 @@
-# Home Guardian AI
+# Square Guardian AI
 
 Local AI video intelligence for home, office, hotel, and factory: person identity, behavior analysis, attendance, vehicle and license plate recognition, guest/room mapping, alerting, and model rollback.
 
