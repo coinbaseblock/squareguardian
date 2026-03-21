@@ -19,6 +19,10 @@ objects:
     - motorcycle
     - bus
     - truck
+    # item detection
+    - backpack
+    - suitcase
+    - handbag
 
 detectors:
   cpu1:

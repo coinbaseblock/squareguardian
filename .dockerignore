@@ -1,0 +1,6 @@
+.git
+.env
+storage/
+dist/
+*.exe
+squareguardian
