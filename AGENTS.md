@@ -2,7 +2,7 @@
 
 ## Project
 
-This repository builds `home-guardian-ai`, a local AI video intelligence system for home, office, hotel, and factory environments.
+This repository builds `SpaceGuardian`, a local AI video intelligence system for home, office, hotel, and factory environments.
 
 ## Core rule
 
