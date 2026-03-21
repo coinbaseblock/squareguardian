@@ -17,3 +17,22 @@ services:
       - ./config/frigate:/config
       - ./storage/frigate:/media/frigate
       - /etc/localtime:/etc/localtime:ro
+
+  squareguardian:
+    container_name: spaceguardian-detector
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      FRIGATE_URL: http://frigate:5000
+      LISTEN_ADDR: ":8080"
+      POLL_INTERVAL_SEC: ${POLL_INTERVAL_SEC:-5}
+      TRACKED_ITEMS: ${TRACKED_ITEMS:-person,car,motorcycle,bus,truck,backpack,suitcase,handbag}
+      EVENT_LOG_PATH: /data/events
+    volumes:
+      - ./storage/events:/data/events
+    depends_on:
+      - frigate
