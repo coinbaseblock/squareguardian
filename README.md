@@ -109,6 +109,8 @@ docker compose logs -f frigate
 scripts\clean.cmd
 ```
 
+แนะนำให้เรียกผ่าน `clean.cmd` แทน `clean.ps1` โดยตรง เพราะตัว `.cmd` จะตั้ง `-ExecutionPolicy Bypass` ให้ในรอบนั้น และช่วยเลี่ยงปัญหา PowerShell policy บน Windows เครื่องใหม่ ๆ ได้
+
 สคริปต์นี้จะ:
 
 - `docker compose down --remove-orphans --volumes`
