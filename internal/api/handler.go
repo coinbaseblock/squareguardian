@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -100,10 +101,17 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 			noteDisplay = ""
 		}
 
-		// Thumbnail image
-		thumbImg := fmt.Sprintf(
-			`<img src="/api/thumbnail/%s" alt="%s" style="width:80px;height:60px;object-fit:cover;border-radius:4px;background:#252836" loading="lazy">`,
-			e.ID, e.Label)
+		// Thumbnail image — use base64 data URI from cached event data
+		thumbImg := ""
+		if e.Thumbnail != "" {
+			thumbImg = fmt.Sprintf(
+				`<img src="data:image/jpeg;base64,%s" alt="%s" style="width:80px;height:60px;object-fit:cover;border-radius:4px;background:#252836" loading="lazy">`,
+				e.Thumbnail, e.Label)
+		} else {
+			thumbImg = fmt.Sprintf(
+				`<img src="/api/thumbnail/%s" alt="%s" style="width:80px;height:60px;object-fit:cover;border-radius:4px;background:#252836" loading="lazy">`,
+				e.ID, e.Label)
+		}
 
 		snapLink := ""
 		if e.Snapshot != "" {
@@ -189,6 +197,22 @@ func (h *Handler) thumbnail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "event_id required", http.StatusBadRequest)
 		return
 	}
+
+	// Try serving from cached base64 thumbnail data first
+	for _, e := range h.det.Events("") {
+		if e.ID == eventID && e.Thumbnail != "" {
+			data, err := base64.StdEncoding.DecodeString(e.Thumbnail)
+			if err == nil {
+				w.Header().Set("Content-Type", "image/jpeg")
+				w.Header().Set("Cache-Control", "public, max-age=60")
+				w.Write(data)
+				return
+			}
+			break
+		}
+	}
+
+	// Fallback: proxy to Frigate
 	h.proxyFrigate(w, fmt.Sprintf("/api/events/%s/thumbnail.jpg", eventID))
 }
 
