@@ -11,6 +11,7 @@
 ต้องทำให้ได้ก่อน:
 
 - Docker Compose สตาร์ตได้ด้วยคำสั่งเดียว
+- มี script สำหรับ start/cleanup บนเครื่อง dev โดยไม่ต้องจำชุดคำสั่ง prune เอง
 - กล้อง RTSP 1 ตัวใช้งานได้
 - ตรวจจับ `person` ได้
 - ตรวจจับ `vehicle` ได้
@@ -51,11 +52,12 @@
 ถือว่า MVP ใช้งานได้ เมื่อ:
 
 1. `docker compose up -d` แล้ว stack ขึ้น
-2. Tapo RTSP 1 ตัวเชื่อมได้จริง
-3. เห็น `person` และ `vehicle` ใน Frigate UI
-4. มี snapshot จาก event
-5. ปรับ zone เองได้จาก config
-6. README อธิบายการเริ่มต้นได้ครบ
+2. มีทางเลือกแบบ script สำหรับ start/export/cleanup บน Windows ได้ทันที
+3. Tapo RTSP 1 ตัวเชื่อมได้จริง
+4. เห็น `person` และ `vehicle` ใน Frigate UI
+5. มี snapshot จาก event
+6. ปรับ zone เองได้จาก config
+7. README อธิบายการเริ่มต้นและการล้างระบบได้ครบ
 
 ## แนวคิดสำคัญ
 
@@ -64,3 +66,4 @@
 - อย่าเพิ่ม dependency หนักถ้ายังไม่จำเป็น
 - เก็บ credential ผ่าน `.env` เท่านั้น
 - documentation ต้องพาคนเริ่มได้จริง
+- cleanup ต้องทำซ้ำได้ง่ายและไม่บังคับให้จำ manual steps
