@@ -20,7 +20,15 @@ func main() {
 
 	cfg := config.Load()
 
-	det := detector.New(cfg.FrigateURL, cfg.TrackedItems, cfg.PollInterval)
+	det := detector.New(
+		cfg.FrigateURL,
+		cfg.TrackedItems,
+		cfg.PollInterval,
+		cfg.EventLogPath,
+		cfg.MaxStorageGB,
+		cfg.BufferGB,
+		cfg.SaveIntervalS,
+	)
 	det.Start()
 	defer det.Stop()
 

@@ -37,6 +37,9 @@ services:
       POLL_INTERVAL_SEC: ${POLL_INTERVAL_SEC:-5}
       TRACKED_ITEMS: ${TRACKED_ITEMS:-person,car,motorcycle,bus,backpack,suitcase,handbag}
       EVENT_LOG_PATH: /data/events
+      MAX_STORAGE_GB: ${MAX_STORAGE_GB:-256}
+      BUFFER_GB: ${BUFFER_GB:-10}
+      SAVE_INTERVAL_SEC: ${SAVE_INTERVAL_SEC:-30}
     volumes:
       - ./storage/events:/data/events
     depends_on:
