@@ -1,6 +1,9 @@
 mqtt:
   enabled: false
 
+tls:
+  enabled: false
+
 birdseye:
   enabled: true
 
