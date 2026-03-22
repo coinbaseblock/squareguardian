@@ -22,6 +22,18 @@ type Event struct {
 	VehicleColor string `json:"vehicle_color,omitempty"` // e.g. สีขาว
 	VehicleInfo  string `json:"vehicle_info,omitempty"`  // legacy combined field
 	Note         string `json:"note,omitempty"`          // free-form user feedback
+
+	// Grouping for training data
+	GroupID string `json:"group_id,omitempty"` // groups multiple events of the same entity
+}
+
+// EventGroup represents a named group of events belonging to the same entity.
+type EventGroup struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Label    string `json:"label"`     // person, car, etc.
+	EventIDs []string `json:"event_ids"`
+	CreatedAt float64 `json:"created_at"`
 }
 
 // FrigateEvent is the raw event structure returned by Frigate API.

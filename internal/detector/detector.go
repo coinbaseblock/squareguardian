@@ -23,6 +23,7 @@ type Detector struct {
 	mu     sync.RWMutex
 	events []Event
 	idSet  map[string]bool // deduplication set
+	groups []EventGroup    // named groups of events
 
 	// Persistent storage
 	dataDir      string
@@ -262,6 +263,17 @@ func (d *Detector) loadFromDisk() error {
 	for _, e := range events {
 		d.idSet[e.ID] = true
 	}
+
+	// Load groups
+	groupsPath := filepath.Join(d.dataDir, "groups.json")
+	gdata, err := os.ReadFile(groupsPath)
+	if err == nil {
+		var groups []EventGroup
+		if err := json.Unmarshal(gdata, &groups); err == nil {
+			d.groups = groups
+			log.Printf("detector: loaded %d groups from disk", len(groups))
+		}
+	}
 	return nil
 }
 
@@ -294,7 +306,101 @@ func (d *Detector) saveToDisk() error {
 		return fmt.Errorf("rename %s: %w", filePath, err)
 	}
 	log.Printf("detector: saved %d events to disk", len(eventsCopy))
+
+	// Save groups
+	groupsCopy := make([]EventGroup, len(d.groups))
+	copy(groupsCopy, d.groups)
+	if len(groupsCopy) > 0 {
+		gdata, err := json.Marshal(groupsCopy)
+		if err == nil {
+			groupsPath := filepath.Join(d.dataDir, "groups.json")
+			gtmpPath := groupsPath + ".tmp"
+			if err := os.WriteFile(gtmpPath, gdata, 0644); err == nil {
+				os.Rename(gtmpPath, groupsPath)
+			}
+		}
+	}
 	return nil
+}
+
+// GroupEvents assigns events to a named group.
+func (d *Detector) GroupEvents(groupName, label string, eventIDs []string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	groupID := fmt.Sprintf("g-%d", time.Now().UnixNano())
+
+	// Set GroupID on matching events
+	for i := range d.events {
+		for _, id := range eventIDs {
+			if d.events[i].ID == id {
+				d.events[i].GroupID = groupID
+			}
+		}
+	}
+
+	d.groups = append(d.groups, EventGroup{
+		ID:        groupID,
+		Name:      groupName,
+		Label:     label,
+		EventIDs:  eventIDs,
+		CreatedAt: float64(time.Now().Unix()),
+	})
+	d.dirty = true
+	return groupID
+}
+
+// Groups returns all event groups.
+func (d *Detector) Groups() []EventGroup {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	result := make([]EventGroup, len(d.groups))
+	copy(result, d.groups)
+	return result
+}
+
+// DeleteGroup removes a group and unsets GroupID on its events.
+func (d *Detector) DeleteGroup(groupID string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	idx := -1
+	for i, g := range d.groups {
+		if g.ID == groupID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return false
+	}
+
+	// Unset GroupID on events
+	for i := range d.events {
+		if d.events[i].GroupID == groupID {
+			d.events[i].GroupID = ""
+		}
+	}
+
+	d.groups = append(d.groups[:idx], d.groups[idx+1:]...)
+	d.dirty = true
+	return true
+}
+
+// TrainingData returns grouped events organized for model training export.
+func (d *Detector) TrainingData() map[string][]Event {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	result := make(map[string][]Event)
+	for _, g := range d.groups {
+		for _, e := range d.events {
+			if e.GroupID == g.ID {
+				result[g.ID] = append(result[g.ID], e)
+			}
+		}
+	}
+	return result
 }
 
 // checkDiskUsage removes oldest events when storage exceeds the limit.

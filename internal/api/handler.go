@@ -32,6 +32,10 @@ func New(det *detector.Detector) *Handler {
 	h.mux.HandleFunc("/api/annotate", h.annotate)
 	h.mux.HandleFunc("/api/thumbnail/", h.thumbnail)
 	h.mux.HandleFunc("/api/snapshot/", h.snapshot)
+	h.mux.HandleFunc("/api/group", h.group)
+	h.mux.HandleFunc("/api/groups", h.groups)
+	h.mux.HandleFunc("/api/groups/delete", h.deleteGroup)
+	h.mux.HandleFunc("/api/training-data", h.trainingData)
 	return h
 }
 
@@ -88,6 +92,7 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
 	events := h.det.Events("")
 	labels := h.det.TrackedLabels()
+	groups := h.det.Groups()
 
 	// Sort labels for consistent display
 	sort.Strings(labels)
@@ -128,6 +133,20 @@ func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
 				identBadge += fmt.Sprintf(`<span class="room-badge">%s</span>`, e.RoomNumber)
 			}
 
+			groupBadge := ""
+			if e.GroupID != "" {
+				gname := ""
+				for _, g := range groups {
+					if g.ID == e.GroupID {
+						gname = g.Name
+						break
+					}
+				}
+				if gname != "" {
+					groupBadge = fmt.Sprintf(`<span class="group-badge">%s</span>`, gname)
+				}
+			}
+
 			var thumbSrc string
 			if e.Thumbnail != "" {
 				thumbSrc = fmt.Sprintf("data:image/jpeg;base64,%s", e.Thumbnail)
@@ -135,19 +154,22 @@ func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
 				thumbSrc = fmt.Sprintf("/api/thumbnail/%s", e.ID)
 			}
 
-			thumbs += fmt.Sprintf(`<div class="ev-card" onclick="openFeedback('%s','%s','%s','%s','%s','%s','%s','%s','%s')">
+			thumbs += fmt.Sprintf(`<div class="ev-card" data-event-id="%s" data-label="%s" onclick="handleCardClick(event, '%s','%s','%s','%s','%s','%s','%s','%s','%s')">
+				<input type="checkbox" class="ev-checkbox" data-event-id="%s" onclick="event.stopPropagation(); toggleSelect('%s')">
 				<img src="%s" alt="%s" loading="lazy">
 				<div class="ev-time">%s · %s</div>
-				%s
+				%s%s
 			</div>`,
+				e.ID, e.Label,
 				e.ID, e.Label,
 				escapeJS(e.Identity), escapeJS(e.RoomNumber),
 				escapeJS(e.LicensePlate), escapeJS(e.Province),
 				escapeJS(e.VehicleBrand), escapeJS(e.VehicleColor),
 				escapeJS(e.Note),
+				e.ID, e.ID,
 				thumbSrc, e.Label,
 				ts, ago,
-				identBadge)
+				identBadge, groupBadge)
 		}
 
 		moreIndicator := ""
@@ -165,8 +187,40 @@ func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
 		sections = `<div style="text-align:center;color:#888;padding:3em">ยังไม่มี event — รอ Frigate ตรวจจับ...</div>`
 	}
 
+	// Build existing groups summary
+	groupsSummary := ""
+	if len(groups) > 0 {
+		groupsSummary = `<div class="ev-section" style="border-top:1px solid #333;padding-top:1em;margin-top:1em">
+			<h2>กลุ่มที่สร้างแล้ว <span class="ev-count">` + fmt.Sprintf("%d", len(groups)) + ` Groups</span></h2>`
+		for _, g := range groups {
+			// Find event thumbnails for this group
+			thumbPreviews := ""
+			count := 0
+			for _, e := range events {
+				if e.GroupID == g.ID && count < 5 {
+					var src string
+					if e.Thumbnail != "" {
+						src = fmt.Sprintf("data:image/jpeg;base64,%s", e.Thumbnail)
+					} else {
+						src = fmt.Sprintf("/api/thumbnail/%s", e.ID)
+					}
+					thumbPreviews += fmt.Sprintf(`<img src="%s" style="width:50px;height:40px;object-fit:cover;border-radius:4px">`, src)
+					count++
+				}
+			}
+			groupsSummary += fmt.Sprintf(`<div class="group-row">
+				<div class="group-info">
+					<strong>%s</strong> <span style="color:#888">(%s · %d ภาพ)</span>
+				</div>
+				<div class="group-thumbs">%s</div>
+				<button class="btn-delete-group" onclick="deleteGroup('%s')">ลบกลุ่ม</button>
+			</div>`, g.Name, labelDisplayName(g.Label), len(g.EventIDs), thumbPreviews, g.ID)
+		}
+		groupsSummary += `</div>`
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, eventsPageTpl, sections)
+	fmt.Fprintf(w, eventsPageTpl, sections, groupsSummary)
 }
 
 func (h *Handler) healthz(w http.ResponseWriter, _ *http.Request) {
@@ -255,6 +309,93 @@ func (h *Handler) snapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.proxyFrigate(w, fmt.Sprintf("/api/events/%s/snapshot.jpg", eventID))
+}
+
+func (h *Handler) group(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Name     string   `json:"name"`
+		Label    string   `json:"label"`
+		EventIDs []string `json:"event_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if req.Name == "" || len(req.EventIDs) < 2 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required and at least 2 event_ids"})
+		return
+	}
+	groupID := h.det.GroupEvents(req.Name, req.Label, req.EventIDs)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "group_id": groupID})
+}
+
+func (h *Handler) groups(w http.ResponseWriter, r *http.Request) {
+	groups := h.det.Groups()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"count":  len(groups),
+		"groups": groups,
+	})
+}
+
+func (h *Handler) deleteGroup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		GroupID string `json:"group_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if h.det.DeleteGroup(req.GroupID) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	} else {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "group not found"})
+	}
+}
+
+func (h *Handler) trainingData(w http.ResponseWriter, r *http.Request) {
+	groups := h.det.Groups()
+	events := h.det.Events("")
+
+	type TrainingEntry struct {
+		GroupID   string           `json:"group_id"`
+		GroupName string           `json:"group_name"`
+		Label     string          `json:"label"`
+		Events    []detector.Event `json:"events"`
+	}
+
+	eventMap := make(map[string]detector.Event)
+	for _, e := range events {
+		eventMap[e.ID] = e
+	}
+
+	var entries []TrainingEntry
+	for _, g := range groups {
+		var gevts []detector.Event
+		for _, eid := range g.EventIDs {
+			if e, ok := eventMap[eid]; ok {
+				gevts = append(gevts, e)
+			}
+		}
+		entries = append(entries, TrainingEntry{
+			GroupID:   g.ID,
+			GroupName: g.Name,
+			Label:     g.Label,
+			Events:    gevts,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"count":         len(entries),
+		"training_data": entries,
+	})
 }
 
 func (h *Handler) proxyFrigate(w http.ResponseWriter, path string) {
@@ -629,7 +770,7 @@ var eventsPageTpl = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SpaceGuardian — Events</title>
-<meta http-equiv="refresh" content="15">
+<meta http-equiv="refresh" content="30">
 <style>` + sharedStyles + `
 /* Events page grid */
 .ev-section{margin-bottom:2em}
@@ -642,7 +783,51 @@ var eventsPageTpl = `<!DOCTYPE html>
 .ev-time{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.8));color:#ddd;font-size:.7em;padding:4px 6px;text-align:right}
 .ident-badge{position:absolute;top:4px;left:4px;background:rgba(25,118,210,.85);color:#fff;font-size:.65em;padding:2px 6px;border-radius:4px}
 .room-badge{position:absolute;top:4px;right:4px;background:rgba(56,142,60,.85);color:#fff;font-size:.65em;padding:2px 6px;border-radius:4px}
+.group-badge{position:absolute;bottom:22px;left:4px;background:rgba(156,39,176,.85);color:#fff;font-size:.6em;padding:2px 6px;border-radius:4px}
 .more-indicator{display:flex;align-items:center;justify-content:center;width:150px;height:110px;background:#252836;border-radius:8px;color:#4fc3f7;font-size:.85em;cursor:default}
+
+/* Multi-select mode */
+.ev-checkbox{position:absolute;top:4px;left:4px;z-index:5;width:20px;height:20px;cursor:pointer;accent-color:#4fc3f7;display:none}
+body.select-mode .ev-checkbox{display:block}
+body.select-mode .ident-badge{left:28px}
+.ev-card.selected{outline:3px solid #4fc3f7;outline-offset:-3px}
+.ev-card.selected::after{content:'';position:absolute;inset:0;background:rgba(79,195,247,.15);pointer-events:none}
+
+/* Select mode toggle */
+.select-toggle{background:#252836;border:1px solid #555;color:#4fc3f7;padding:.4em 1em;border-radius:6px;cursor:pointer;font-size:.85em;margin-left:1em}
+.select-toggle.active{background:#1976d2;color:#fff;border-color:#1976d2}
+
+/* Floating action bar */
+.select-bar{display:none;position:fixed;bottom:1.5em;left:50%%;transform:translateX(-50%%);background:#1a1d28;border:1px solid #4fc3f7;border-radius:12px;padding:.8em 1.5em;z-index:50;gap:1em;align-items:center;box-shadow:0 4px 24px rgba(0,0,0,.6)}
+.select-bar.show{display:flex}
+.select-bar .count{color:#4fc3f7;font-weight:bold;font-size:1em}
+.select-bar button{padding:.4em 1em;border-radius:6px;border:none;cursor:pointer;font-size:.85em}
+.select-bar .btn-group{background:#1976d2;color:#fff}
+.select-bar .btn-group:hover{background:#1565c0}
+.select-bar .btn-clear{background:#333;color:#ccc}
+.select-bar .btn-clear:hover{background:#444}
+
+/* Group modal */
+.group-modal-bg{display:none;position:fixed;top:0;left:0;width:100%%;height:100%%;background:rgba(0,0,0,.7);z-index:100;justify-content:center;align-items:center}
+.group-modal-bg.open{display:flex}
+.group-modal{background:#1a1d28;border:1px solid #333;border-radius:12px;padding:1.5em;width:480px;max-width:95vw}
+.group-modal h3{margin-bottom:1em;color:#fff}
+.group-modal label{display:block;color:#999;font-size:.85em;margin-top:.8em}
+.group-modal input{width:100%%;padding:.5em;background:#252836;border:1px solid #444;border-radius:6px;color:#e0e0e0;font-size:.9em;margin-top:.3em}
+.group-modal .preview-grid{display:flex;gap:.5em;flex-wrap:wrap;margin-top:.8em;max-height:200px;overflow-y:auto}
+.group-modal .preview-grid img{width:80px;height:60px;object-fit:cover;border-radius:4px}
+.group-modal .actions{margin-top:1.2em;display:flex;gap:.8em;justify-content:flex-end}
+.group-modal button{padding:.5em 1.2em;border-radius:6px;border:none;cursor:pointer;font-size:.9em}
+.group-modal .btn-save{background:#1976d2;color:#fff}
+.group-modal .btn-cancel{background:#333;color:#ccc}
+.group-modal .msg{margin-top:.5em;font-size:.85em;color:#4caf50}
+
+/* Groups summary */
+.group-row{display:flex;align-items:center;gap:1em;background:#1a1d28;border-radius:8px;padding:.8em 1em;margin-bottom:.5em}
+.group-info{flex:1}
+.group-thumbs{display:flex;gap:4px}
+.btn-delete-group{background:#333;border:1px solid #555;color:#f44336;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:.8em}
+.btn-delete-group:hover{background:#4a1a1a}
 </style>
 </head>
 <body>
@@ -650,21 +835,191 @@ var eventsPageTpl = `<!DOCTYPE html>
 <div class="nav">
   <a href="/">Dashboard</a>
   <a href="/events" class="active">Events (แยกประเภท)</a>
+  <button class="select-toggle" id="selectToggle" onclick="toggleSelectMode()">เลือกหลายรายการ</button>
 </div>
 
-<p style="color:#888;font-size:.85em;margin-bottom:1em">คลิกที่รูปเพื่อระบุตัวตน, ห้อง, ทะเบียนรถ, ยี่ห้อ/สี — ข้อมูลจะถูกใช้แยกแยะบุคคลและรถแต่ละคัน</p>
+<p style="color:#888;font-size:.85em;margin-bottom:1em">คลิกที่รูปเพื่อระบุตัวตน, ห้อง, ทะเบียนรถ, ยี่ห้อ/สี — กด <strong>"เลือกหลายรายการ"</strong> เพื่อเลือกหลายรูปแล้วจัดกลุ่มเป็นคน/รถ คันเดียวกัน</p>
+
+%s
 
 %s
 
 ` + feedbackModalHTML + `
 
+<!-- Group Modal -->
+<div class="group-modal-bg" id="groupModal">
+<div class="group-modal">
+  <h3>สร้างกลุ่มใหม่</h3>
+  <p style="color:#888;font-size:.85em">รวมภาพที่เลือกเป็นกลุ่มเดียวกัน (เช่น คนเดียวกัน, รถคันเดียวกัน)</p>
+  <label>ชื่อกลุ่ม</label>
+  <input type="text" id="group-name" placeholder="เช่น สมชาย, รถขาว Toyota, คนส่งพัสดุ">
+  <label>ประเภท</label>
+  <input type="text" id="group-label" readonly style="color:#4fc3f7">
+  <label>ภาพที่เลือก</label>
+  <div class="preview-grid" id="group-preview"></div>
+  <div class="actions">
+    <button class="btn-cancel" onclick="closeGroupModal()">ยกเลิก</button>
+    <button class="btn-save" onclick="saveGroup()">สร้างกลุ่ม</button>
+  </div>
+  <div class="msg" id="group-msg"></div>
+</div>
+</div>
+
+<!-- Floating select bar -->
+<div class="select-bar" id="selectBar">
+  <span>เลือกแล้ว <span class="count" id="selectCount">0</span> รายการ</span>
+  <button class="btn-group" onclick="openGroupModal()">สร้างกลุ่ม</button>
+  <button class="btn-clear" onclick="clearSelection()">ยกเลิก</button>
+</div>
+
 <div class="links" style="margin-top:2em">
   <a href="/">Dashboard</a>
   <a href="/api/events">API: Events</a>
-  <a href="/api/status">API: Status</a>
+  <a href="/api/training-data">API: Training Data</a>
+  <a href="/api/groups">API: Groups</a>
 </div>
-<p style="margin-top:1em;color:#666;font-size:.8em">Auto-refresh ทุก 15 วินาที | คลิกที่ภาพเพื่อระบุข้อมูล</p>
+<p style="margin-top:1em;color:#666;font-size:.8em">Auto-refresh ทุก 30 วินาที | คลิกที่ภาพเพื่อระบุข้อมูล | กดปุ่ม "เลือกหลายรายการ" เพื่อจัดกลุ่ม</p>
 
 ` + feedbackScript + `
+<script>
+var selectMode = false;
+var selectedEvents = {};
+
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  document.body.classList.toggle('select-mode', selectMode);
+  document.getElementById('selectToggle').classList.toggle('active', selectMode);
+  if (!selectMode) clearSelection();
+}
+
+function handleCardClick(e, eventId, label, identity, room, plate, province, brand, color, note) {
+  if (selectMode) {
+    toggleSelect(eventId);
+    return;
+  }
+  openFeedback(eventId, label, identity, room, plate, province, brand, color, note);
+}
+
+function toggleSelect(eventId) {
+  if (selectedEvents[eventId]) {
+    delete selectedEvents[eventId];
+  } else {
+    var card = document.querySelector('.ev-card[data-event-id="'+eventId+'"]');
+    selectedEvents[eventId] = card ? card.getAttribute('data-label') : '';
+  }
+  updateSelectionUI();
+}
+
+function updateSelectionUI() {
+  var count = Object.keys(selectedEvents).length;
+  document.getElementById('selectCount').textContent = count;
+  document.getElementById('selectBar').classList.toggle('show', count > 0);
+
+  document.querySelectorAll('.ev-card').forEach(function(card) {
+    var eid = card.getAttribute('data-event-id');
+    var cb = card.querySelector('.ev-checkbox');
+    if (selectedEvents[eid]) {
+      card.classList.add('selected');
+      if (cb) cb.checked = true;
+    } else {
+      card.classList.remove('selected');
+      if (cb) cb.checked = false;
+    }
+  });
+}
+
+function clearSelection() {
+  selectedEvents = {};
+  updateSelectionUI();
+}
+
+function openGroupModal() {
+  var ids = Object.keys(selectedEvents);
+  if (ids.length < 2) {
+    alert('กรุณาเลือกอย่างน้อย 2 รายการ');
+    return;
+  }
+  // Determine label from first selected
+  var labels = {};
+  for (var id in selectedEvents) {
+    labels[selectedEvents[id]] = (labels[selectedEvents[id]] || 0) + 1;
+  }
+  var topLabel = Object.keys(labels).sort(function(a,b){ return labels[b]-labels[a]; })[0];
+  document.getElementById('group-label').value = topLabel;
+  document.getElementById('group-name').value = '';
+  document.getElementById('group-msg').textContent = '';
+
+  // Show preview thumbnails
+  var preview = document.getElementById('group-preview');
+  preview.innerHTML = '';
+  ids.forEach(function(eid) {
+    var card = document.querySelector('.ev-card[data-event-id="'+eid+'"] img');
+    if (card) {
+      var img = document.createElement('img');
+      img.src = card.src;
+      preview.appendChild(img);
+    }
+  });
+
+  document.getElementById('groupModal').classList.add('open');
+}
+
+function closeGroupModal() {
+  document.getElementById('groupModal').classList.remove('open');
+}
+
+function saveGroup() {
+  var name = document.getElementById('group-name').value.trim();
+  var label = document.getElementById('group-label').value;
+  var ids = Object.keys(selectedEvents);
+
+  if (!name) {
+    document.getElementById('group-msg').style.color = '#f44336';
+    document.getElementById('group-msg').textContent = 'กรุณาใส่ชื่อกลุ่ม';
+    return;
+  }
+
+  fetch('/api/group', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: name, label: label, event_ids: ids})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.status === 'ok') {
+      document.getElementById('group-msg').style.color = '#4caf50';
+      document.getElementById('group-msg').textContent = 'สร้างกลุ่มสำเร็จ!';
+      setTimeout(function() { closeGroupModal(); clearSelection(); toggleSelectMode(); location.reload(); }, 800);
+    } else {
+      document.getElementById('group-msg').style.color = '#f44336';
+      document.getElementById('group-msg').textContent = 'Error: ' + (data.error || 'unknown');
+    }
+  })
+  .catch(function(err) {
+    document.getElementById('group-msg').style.color = '#f44336';
+    document.getElementById('group-msg').textContent = 'Network error';
+  });
+}
+
+function deleteGroup(groupId) {
+  if (!confirm('ต้องการลบกลุ่มนี้?')) return;
+  fetch('/api/groups/delete', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({group_id: groupId})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.status === 'ok') location.reload();
+    else alert('Error: ' + (data.error || 'unknown'));
+  })
+  .catch(function() { alert('Network error'); });
+}
+
+// Close group modal on background click
+document.getElementById('groupModal').addEventListener('click', function(e) {
+  if (e.target === this) closeGroupModal();
+});
+</script>
 </body>
 </html>`
