@@ -5,7 +5,7 @@ tls:
   enabled: false
 
 auth:
-  enabled: true
+  enabled: false
 
 birdseye:
   enabled: true

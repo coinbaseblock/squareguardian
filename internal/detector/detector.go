@@ -73,6 +73,28 @@ func (d *Detector) Events(labelFilter string) []Event {
 	return filtered
 }
 
+// Annotate updates an event's user-provided fields (identity, vehicle info, note).
+func (d *Detector) Annotate(eventID, identity, vehicleInfo, note string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	for i := range d.events {
+		if d.events[i].ID == eventID {
+			if identity != "" {
+				d.events[i].Identity = identity
+			}
+			if vehicleInfo != "" {
+				d.events[i].VehicleInfo = vehicleInfo
+			}
+			if note != "" {
+				d.events[i].Note = note
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // TrackedLabels returns the list of tracked item labels.
 func (d *Detector) TrackedLabels() []string {
 	return d.trackedLabels()
