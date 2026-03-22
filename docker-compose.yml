@@ -13,6 +13,8 @@ services:
     environment:
       FRIGATE_TAPO_RTSP_URL: ${FRIGATE_TAPO_RTSP_URL}
       FRIGATE_TIMEZONE: ${FRIGATE_TIMEZONE:-Asia/Bangkok}
+      FRIGATE_DEFAULT_USER: ${FRIGATE_DEFAULT_USER:-admin}
+      FRIGATE_DEFAULT_PASSWORD: ${FRIGATE_DEFAULT_PASSWORD:-SpaceGuardian2026}
     volumes:
       - ./config/frigate:/config
       - ./storage/frigate:/media/frigate
@@ -30,7 +32,7 @@ services:
       FRIGATE_URL: http://frigate:5000
       LISTEN_ADDR: ":8080"
       POLL_INTERVAL_SEC: ${POLL_INTERVAL_SEC:-5}
-      TRACKED_ITEMS: ${TRACKED_ITEMS:-person,car,motorcycle,bus,truck,backpack,suitcase,handbag}
+      TRACKED_ITEMS: ${TRACKED_ITEMS:-person,car,motorcycle,bus,backpack,suitcase,handbag}
       EVENT_LOG_PATH: /data/events
     volumes:
       - ./storage/events:/data/events

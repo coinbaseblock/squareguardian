@@ -4,6 +4,9 @@ mqtt:
 tls:
   enabled: false
 
+auth:
+  enabled: true
+
 birdseye:
   enabled: true
 
@@ -21,7 +24,6 @@ objects:
     - car
     - motorcycle
     - bus
-    - truck
     # item detection
     - backpack
     - suitcase
@@ -53,5 +55,4 @@ cameras:
         inertia: 3
         loitering_time: 0
     snapshots:
-      required_zones:
-        - front_door
+      enabled: true
