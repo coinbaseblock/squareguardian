@@ -93,7 +93,10 @@ scripts\dev-up.cmd -Clean -NoCache
 
 - Frigate UI: `http://localhost:8971`
 - Detector API: `http://localhost:8080`
-- API/config debug: `http://localhost:5000`
+- API/config debug: `http://localhost:5001`
+
+> สำคัญ: ให้เปิด Frigate ผ่าน `http://localhost:8971` สำหรับหน้าเว็บหลักเสมอ  
+> อย่าใช้ `http://localhost:5000/explore` เพราะพอร์ต 5000 เป็น API ภายในของ Frigate และในบางเครื่องจะทำให้รูป thumbnail/snapshot ใน Explore แสดงไม่ขึ้น
 
 ### 4) ตรวจสอบว่ากล้องขึ้น
 

@@ -6,7 +6,10 @@ services:
     shm_size: "512mb"
     ports:
       - "8971:8971"
-      - "5000:5000"
+      # Keep Frigate UI on 8971. Expose the internal API on 5001 so it is
+      # harder to accidentally browse the UI through port 5000, which can
+      # break image rendering in Explore on some local setups.
+      - "5001:5000"
       - "8554:8554"
       - "8555:8555/tcp"
       - "8555:8555/udp"

@@ -56,7 +56,8 @@ try {
     Write-Host ''
     Write-Host 'Frigate UI:  http://localhost:8971' -ForegroundColor Green
     Write-Host 'Detector API: http://localhost:8080' -ForegroundColor Green
-    Write-Host 'Frigate API:  http://localhost:5000' -ForegroundColor Green
+    Write-Host 'Frigate API:  http://localhost:5001' -ForegroundColor Green
+    Write-Host 'Use port 8971 for the Frigate web UI to avoid broken Explore thumbnails.' -ForegroundColor Yellow
     Write-Host ''
     Write-Host 'Useful follow-up:' -ForegroundColor Green
     Write-Host '  docker compose logs -f frigate'
