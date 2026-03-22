@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
 
 function Invoke-DockerCommand {
     param(
@@ -20,28 +21,35 @@ function Invoke-DockerCommand {
 }
 
 Write-Host '== SpaceGuardian cleanup ==' -ForegroundColor Yellow
-Invoke-DockerCommand -Arguments @('compose', 'down', '--remove-orphans', '--volumes')
+Push-Location $repoRoot
 
-$storagePaths = @(
-    'storage/events',
-    'storage/frigate'
-)
+try {
+    Invoke-DockerCommand -Arguments @('compose', 'down', '--remove-orphans', '--volumes')
 
-foreach ($path in $storagePaths) {
-    if (Test-Path $path) {
-        Get-ChildItem -Path $path -Force | Where-Object { $_.Name -ne '.gitkeep' } | Remove-Item -Recurse -Force
-        Write-Host "Cleared $path" -ForegroundColor Yellow
+    $storagePaths = @(
+        'storage/events',
+        'storage/frigate'
+    )
+
+    foreach ($path in $storagePaths) {
+        if (Test-Path $path) {
+            Get-ChildItem -Path $path -Force | Where-Object { $_.Name -ne '.gitkeep' } | Remove-Item -Recurse -Force
+            Write-Host "Cleared $path" -ForegroundColor Yellow
+        }
     }
-}
 
-if ((-not $KeepDist) -and (Test-Path 'dist')) {
-    Remove-Item 'dist' -Recurse -Force
-    Write-Host 'Removed dist/' -ForegroundColor Yellow
-}
+    if ((-not $KeepDist) -and (Test-Path 'dist')) {
+        Remove-Item 'dist' -Recurse -Force
+        Write-Host 'Removed dist/' -ForegroundColor Yellow
+    }
 
-if ($All) {
-    Invoke-DockerCommand -Arguments @('builder', 'prune', '-af')
-    Invoke-DockerCommand -Arguments @('system', 'prune', '-af', '--volumes')
-}
+    if ($All) {
+        Invoke-DockerCommand -Arguments @('builder', 'prune', '-af')
+        Invoke-DockerCommand -Arguments @('system', 'prune', '-af', '--volumes')
+    }
 
-Write-Host 'Cleanup complete.' -ForegroundColor Green
+    Write-Host 'Cleanup complete.' -ForegroundColor Green
+}
+finally {
+    Pop-Location
+}
