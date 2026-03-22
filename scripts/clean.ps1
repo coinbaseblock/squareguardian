@@ -1,9 +1,10 @@
-$ErrorActionPreference = 'Stop'
-
+[CmdletBinding()]
 param(
     [switch]$All,
     [switch]$KeepDist
 )
+
+$ErrorActionPreference = 'Stop'
 
 function Invoke-DockerCommand {
     param(

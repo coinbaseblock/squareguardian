@@ -1,10 +1,11 @@
-$ErrorActionPreference = 'Stop'
-
+[CmdletBinding()]
 param(
     [switch]$Clean,
     [switch]$Export = $true,
     [switch]$NoCache
 )
+
+$ErrorActionPreference = 'Stop'
 
 function Invoke-DockerCommand {
     param(
