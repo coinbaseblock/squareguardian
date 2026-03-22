@@ -33,9 +33,17 @@ detectors:
   cpu1:
     type: cpu
 
+go2rtc:
+  streams:
+    cam_front:
+      - "{FRIGATE_CAMERA_FRONT_RTSP_URL}"
+
 cameras:
   cam_front:
     enabled: true
+    live:
+      streams:
+        main: cam_front
     detect:
       enabled: true
       width: 1280
@@ -43,7 +51,8 @@ cameras:
       fps: 5
     ffmpeg:
       inputs:
-        - path: "{CAMERA_FRONT_RTSP_URL}"
+        - path: rtsp://127.0.0.1:8554/cam_front
+          input_args: preset-rtsp-restream
           roles:
             - detect
     motion:

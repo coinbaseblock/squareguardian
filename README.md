@@ -99,6 +99,7 @@ scripts\dev-up.cmd -Clean -NoCache
 - Frigate UI: `http://localhost:8971`
 - Detector API: `http://localhost:8080`
 - API/config debug: `http://localhost:5001`
+- go2rtc debug UI: `http://localhost:1984`
 
 > สำคัญ: ให้เปิด Frigate ผ่าน `http://localhost:8971` สำหรับหน้าเว็บหลักเสมอ  
 > อย่าใช้ `http://localhost:5000/explore` เพราะพอร์ต 5000 เป็น API ภายในของ Frigate และในบางเครื่องจะทำให้รูป thumbnail/snapshot ใน Explore แสดงไม่ขึ้น
@@ -112,6 +113,12 @@ docker compose logs -f frigate
 ถ้าสตรีมมาปกติ ให้เข้า UI แล้วดูว่ามีภาพสดและเริ่มมี event / snapshot จาก `person` หรือ `vehicle`
 
 ถ้ารัน `docker compose up -d --build` แล้วเห็น warning ว่า `CAMERA_FRONT_RTSP_URL` ยังไม่ถูกตั้งค่า ให้ตรวจสอบว่าใน `.env` มี `CAMERA_FRONT_RTSP_URL=rtsp://...` ถูกต้องแล้ว
+
+ถ้าภาพสดไม่ขึ้นใน Frigate แม้ container จะขึ้นครบแล้ว ให้ตรวจสอบ 3 จุดนี้ก่อน:
+
+1. เปิด UI ผ่าน `http://localhost:8971` ไม่ใช่ `http://localhost:5000`
+2. โปรเจกต์นี้จะส่ง RTSP เข้า Frigate ผ่าน env ชื่อ `FRIGATE_CAMERA_FRONT_RTSP_URL` ภายใน container อัตโนมัติ ดังนั้นใน `.env` ให้ตั้งเฉพาะ `CAMERA_FRONT_RTSP_URL=...` ตัวเดียวก็พอ
+3. เข้า `http://localhost:1984` แล้วดู stream `cam_front` ถ้า go2rtc เล่นไม่ได้ แปลว่า RTSP URL, user/password หรือ path ของกล้องยังไม่ถูกต้อง
 
 ## ลบ/เก็บกวาดแบบไม่ต้อง manual
 
@@ -168,6 +175,7 @@ docker compose up -d --build
 - เปิด snapshots ไว้ 7 วัน
 - track เฉพาะ `person` และกลุ่ม `vehicle`
 - มี zone ตัวอย่าง `front_door`
+- ใช้ go2rtc restream (`cam_front`) เพื่อให้ภาพสดใน UI เสถียรกว่าเดิม
 - ใช้ CPU detector เป็นค่าเริ่มต้นเพื่อให้เริ่มได้แม้ยังไม่มี accelerator
 
 ## หมายเหตุเรื่องการ build Docker

@@ -63,7 +63,9 @@
 
 - ให้ใช้ Frigate UI ผ่านพอร์ต `8971`
 - ถ้าต้อง debug API ให้ใช้พอร์ต `5001`
+- ถ้าต้อง debug live stream ให้ใช้ go2rtc ผ่านพอร์ต `1984`
 - ไม่ควรเปิดหน้า Explore ผ่าน `5000` เพราะ thumbnail/snapshot อาจไม่แสดงในบาง environment
+- RTSP URL ควรถูกส่งเข้าคอนเทนเนอร์ผ่าน env ที่ Frigate substitute ได้จริง (เช่น `FRIGATE_CAMERA_FRONT_RTSP_URL`)
 
 ## แนวคิดสำคัญ
 
