@@ -5,25 +5,32 @@ type Event struct {
 	ID        string  `json:"id"`
 	Camera    string  `json:"camera"`
 	Label     string  `json:"label"`
+	SubLabel  string  `json:"sub_label,omitempty"`
 	TopScore  float64 `json:"top_score"`
 	StartTime float64 `json:"start_time"`
 	EndTime   float64 `json:"end_time"`
 	Zone      string  `json:"zone,omitempty"`
 	Thumbnail string  `json:"thumbnail,omitempty"`
 	Snapshot  string  `json:"snapshot,omitempty"`
+
+	// User-provided annotations
+	Identity    string `json:"identity,omitempty"`    // e.g. person name or vehicle plate
+	VehicleInfo string `json:"vehicle_info,omitempty"` // e.g. "Toyota Camry สีขาว"
+	Note        string `json:"note,omitempty"`         // free-form user feedback
 }
 
 // FrigateEvent is the raw event structure returned by Frigate API.
 type FrigateEvent struct {
-	ID        string   `json:"id"`
-	Camera    string   `json:"camera"`
-	Label     string   `json:"label"`
-	TopScore  float64  `json:"top_score"`
-	StartTime float64  `json:"start_time"`
-	EndTime   *float64 `json:"end_time"`
-	Zones     []string `json:"zones"`
-	Thumbnail string   `json:"thumbnail"`
-	HasSnapshot bool   `json:"has_snapshot"`
+	ID          string   `json:"id"`
+	Camera      string   `json:"camera"`
+	Label       string   `json:"label"`
+	SubLabel    *string  `json:"sub_label"`
+	TopScore    float64  `json:"top_score"`
+	StartTime   float64  `json:"start_time"`
+	EndTime     *float64 `json:"end_time"`
+	Zones       []string `json:"zones"`
+	Thumbnail   string   `json:"thumbnail"`
+	HasSnapshot bool     `json:"has_snapshot"`
 }
 
 // ToEvent converts a FrigateEvent to our internal Event representation.
@@ -35,6 +42,9 @@ func (fe *FrigateEvent) ToEvent() Event {
 		TopScore:  fe.TopScore,
 		StartTime: fe.StartTime,
 		Thumbnail: fe.Thumbnail,
+	}
+	if fe.SubLabel != nil {
+		e.SubLabel = *fe.SubLabel
 	}
 	if fe.EndTime != nil {
 		e.EndTime = *fe.EndTime
