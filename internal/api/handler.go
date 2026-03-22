@@ -3,9 +3,11 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"squareguardian/internal/detector"
@@ -25,6 +27,8 @@ func New(det *detector.Detector) *Handler {
 	h.mux.HandleFunc("/api/events", h.events)
 	h.mux.HandleFunc("/api/status", h.status)
 	h.mux.HandleFunc("/api/annotate", h.annotate)
+	h.mux.HandleFunc("/api/thumbnail/", h.thumbnail)
+	h.mux.HandleFunc("/api/snapshot/", h.snapshot)
 	return h
 }
 
@@ -96,9 +100,14 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 			noteDisplay = ""
 		}
 
+		// Thumbnail image
+		thumbImg := fmt.Sprintf(
+			`<img src="/api/thumbnail/%s" alt="%s" style="width:80px;height:60px;object-fit:cover;border-radius:4px;background:#252836" loading="lazy">`,
+			e.ID, e.Label)
+
 		snapLink := ""
 		if e.Snapshot != "" {
-			snapLink = fmt.Sprintf(`<a href="/api/events?label=%s" target="_blank">📷</a>`, e.Label)
+			snapLink = fmt.Sprintf(`<a href="/api/snapshot/%s" target="_blank">📷</a>`, e.ID)
 		}
 
 		// Feedback button
@@ -108,17 +117,17 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 		eventRows += fmt.Sprintf(
 			`<tr>
-				<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>
+				<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>
 				<td>%s</td><td>%s</td><td>%s</td>
 				<td class="note-cell">%s</td>
 				<td>%s %s</td>
 			</tr>`,
-			ts, e.Camera, e.Label, subLabel, score, zone,
+			thumbImg, ts, e.Camera, e.Label, subLabel, score, zone,
 			identityDisplay, vehicleDisplay, noteDisplay,
 			snapLink, feedbackBtn)
 	}
 	if eventRows == "" {
-		eventRows = `<tr><td colspan="10" style="text-align:center;color:#888;padding:2em">ยังไม่มี event — รอ Frigate ตรวจจับ...</td></tr>`
+		eventRows = `<tr><td colspan="11" style="text-align:center;color:#888;padding:2em">ยังไม่มี event — รอ Frigate ตรวจจับ...</td></tr>`
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -172,6 +181,39 @@ func (h *Handler) annotate(w http.ResponseWriter, r *http.Request) {
 	} else {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
 	}
+}
+
+func (h *Handler) thumbnail(w http.ResponseWriter, r *http.Request) {
+	eventID := strings.TrimPrefix(r.URL.Path, "/api/thumbnail/")
+	if eventID == "" {
+		http.Error(w, "event_id required", http.StatusBadRequest)
+		return
+	}
+	h.proxyFrigate(w, fmt.Sprintf("/api/events/%s/thumbnail.jpg", eventID))
+}
+
+func (h *Handler) snapshot(w http.ResponseWriter, r *http.Request) {
+	eventID := strings.TrimPrefix(r.URL.Path, "/api/snapshot/")
+	if eventID == "" {
+		http.Error(w, "event_id required", http.StatusBadRequest)
+		return
+	}
+	h.proxyFrigate(w, fmt.Sprintf("/api/events/%s/snapshot.jpg", eventID))
+}
+
+func (h *Handler) proxyFrigate(w http.ResponseWriter, path string) {
+	url := h.det.FrigateURL() + path
+	resp, err := http.Get(url)
+	if err != nil {
+		http.Error(w, "upstream error", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -268,7 +310,7 @@ a{color:#4fc3f7;text-decoration:none}
 <h2>Events ล่าสุด (20 รายการ)</h2>
 <table>
 <tr>
-  <th>เวลา</th><th>กล้อง</th><th>ตรวจพบ</th><th>Sub-Label</th><th>ความมั่นใจ</th>
+  <th>ภาพ</th><th>เวลา</th><th>กล้อง</th><th>ตรวจพบ</th><th>Sub-Label</th><th>ความมั่นใจ</th>
   <th>โซน</th><th>ระบุตัวตน</th><th>ข้อมูลรถ</th><th>หมายเหตุ</th><th></th>
 </tr>
 %s

@@ -95,6 +95,11 @@ func (d *Detector) Annotate(eventID, identity, vehicleInfo, note string) bool {
 	return false
 }
 
+// FrigateURL returns the configured Frigate base URL.
+func (d *Detector) FrigateURL() string {
+	return d.frigateURL
+}
+
 // TrackedLabels returns the list of tracked item labels.
 func (d *Detector) TrackedLabels() []string {
 	return d.trackedLabels()
