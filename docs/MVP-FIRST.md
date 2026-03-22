@@ -67,3 +67,4 @@
 - เก็บ credential ผ่าน `.env` เท่านั้น
 - documentation ต้องพาคนเริ่มได้จริง
 - cleanup ต้องทำซ้ำได้ง่ายและไม่บังคับให้จำ manual steps
+- start/cleanup script ควรหา root ของโปรเจกต์เองได้ เพื่อให้เรียกจาก root repo หรือโฟลเดอร์ `scripts/` บน Windows ได้เหมือนกัน

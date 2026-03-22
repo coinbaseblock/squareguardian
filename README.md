@@ -62,6 +62,8 @@ FRIGATE_TIMEZONE=Asia/Bangkok
 scripts\dev-up.cmd
 ```
 
+คุณสามารถรันคำสั่งนี้จาก root repo หรือจากโฟลเดอร์ `scripts\` ก็ได้ เพราะสคริปต์จะสลับกลับไปใช้ root ของโปรเจกต์ให้อัตโนมัติ
+
 #### PowerShell
 
 ```powershell
@@ -108,6 +110,8 @@ docker compose logs -f frigate
 ```cmd
 scripts\clean.cmd
 ```
+
+เช่นเดียวกัน สคริปต์ cleanup สามารถเรียกจาก root repo หรือจากโฟลเดอร์ `scripts\` ได้โดยไม่ต้อง `cd ..` ก่อน
 
 แนะนำให้เรียกผ่าน `clean.cmd` แทน `clean.ps1` โดยตรง เพราะตัว `.cmd` จะตั้ง `-ExecutionPolicy Bypass` ให้ในรอบนั้น และช่วยเลี่ยงปัญหา PowerShell policy บน Windows เครื่องใหม่ ๆ ได้
 
