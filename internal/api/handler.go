@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/coinbaseblock/squareguardian/internal/detector"
+	"squareguardian/internal/detector"
 )
 
 // Handler serves the SpaceGuardian HTTP API.

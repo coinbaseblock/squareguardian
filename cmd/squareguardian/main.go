@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/coinbaseblock/squareguardian/internal/api"
-	"github.com/coinbaseblock/squareguardian/internal/config"
-	"github.com/coinbaseblock/squareguardian/internal/detector"
+	"squareguardian/internal/api"
+	"squareguardian/internal/config"
+	"squareguardian/internal/detector"
 )
 
 func main() {
