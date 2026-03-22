@@ -14,9 +14,14 @@ type Event struct {
 	Snapshot  string  `json:"snapshot,omitempty"`
 
 	// User-provided annotations
-	Identity    string `json:"identity,omitempty"`    // e.g. person name or vehicle plate
-	VehicleInfo string `json:"vehicle_info,omitempty"` // e.g. "Toyota Camry สีขาว"
-	Note        string `json:"note,omitempty"`         // free-form user feedback
+	Identity     string `json:"identity,omitempty"`      // e.g. person name
+	RoomNumber   string `json:"room_number,omitempty"`   // e.g. A0213
+	LicensePlate string `json:"license_plate,omitempty"` // e.g. ทร 3474
+	Province     string `json:"province,omitempty"`      // e.g. กรุงเทพ
+	VehicleBrand string `json:"vehicle_brand,omitempty"` // e.g. Toyota Camry
+	VehicleColor string `json:"vehicle_color,omitempty"` // e.g. สีขาว
+	VehicleInfo  string `json:"vehicle_info,omitempty"`  // legacy combined field
+	Note         string `json:"note,omitempty"`          // free-form user feedback
 }
 
 // FrigateEvent is the raw event structure returned by Frigate API.
