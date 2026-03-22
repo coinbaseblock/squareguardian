@@ -1,3 +1,3 @@
-module github.com/coinbaseblock/squareguardian
+module squareguardian
 
 go 1.25.0

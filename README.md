@@ -82,6 +82,8 @@ docker compose logs -f frigate
 
 ตอนนี้ service `squareguardian` ใช้เฉพาะ Go standard library จึงอาจยังไม่มีไฟล์ `go.sum` ใน repo ได้ตามปกติ. Docker build ถูกตั้งให้ใช้ `go.mod` ได้โดยตรง และใช้ Go 1.25 ให้ตรงกับเวอร์ชันที่ระบุใน module.
 
+สำหรับการใช้งานแบบ local/offline ใน repo นี้ `go.mod` ถูกตั้ง module เป็น `squareguardian` ตรง ๆ แล้ว จึงไม่ต้องอ้าง path แบบ remote เช่น `github.com/coinbaseblock/squareguardian`.
+
 ## ถ้าจะปรับให้เหมาะกับจุดติดตั้งจริง
 
 แนะนำให้ปรับ 3 อย่างก่อน:
