@@ -51,6 +51,8 @@ CAMERA_FRONT_RTSP_URL=rtsp://username:password@192.168.1.50/stream1
 FRIGATE_TIMEZONE=Asia/Bangkok
 ```
 
+> ถ้ามี `.env` เก่าที่ใช้ `FRIGATE_TAPO_RTSP_URL` อยู่แล้ว ตอนนี้ stack รองรับชื่อนั้นแบบ backward-compatible ด้วย แต่แนะนำให้ตั้งชื่อหลักเป็น `CAMERA_FRONT_RTSP_URL` เพื่อให้ตรงกับ config ของ repo
+
 ตัวอย่าง RTSP URL แต่ละยี่ห้อ:
 - **Tapo:** `rtsp://user:pass@IP/stream1`
 - **Hikvision:** `rtsp://admin:pass@IP:554/Streaming/Channels/101`
@@ -110,6 +112,8 @@ docker compose logs -f frigate
 ```
 
 ถ้าสตรีมมาปกติ ให้เข้า UI แล้วดูว่ามีภาพสดและเริ่มมี event / snapshot จาก `person` หรือ `vehicle`
+
+ถ้ารัน `docker compose up -d --build` แล้วเห็น warning ว่า `CAMERA_FRONT_RTSP_URL` ยังไม่ถูกตั้งค่า แต่ใน `.env` มีค่า `FRIGATE_TAPO_RTSP_URL` อยู่แล้ว เวอร์ชันปัจจุบันของ compose รองรับทั้งสองชื่อ แต่ควรค่อย ๆ migrate `.env` ของคุณมาใช้ `CAMERA_FRONT_RTSP_URL` เพื่อให้ชื่อ config ตรงกับ repo และลดความสับสน
 
 ## ลบ/เก็บกวาดแบบไม่ต้อง manual
 

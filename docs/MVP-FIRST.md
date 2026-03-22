@@ -71,6 +71,7 @@
 - ใช้ zone/rule ที่เข้าใจง่ายก่อน
 - อย่าเพิ่ม dependency หนักถ้ายังไม่จำเป็น
 - เก็บ credential ผ่าน `.env` เท่านั้น
+- ใช้ `CAMERA_FRONT_RTSP_URL` เป็นชื่อตัวแปรหลัก และยังรองรับ `FRIGATE_TAPO_RTSP_URL` ชั่วคราวสำหรับ `.env` เก่า
 - documentation ต้องพาคนเริ่มได้จริง
 - cleanup ต้องทำซ้ำได้ง่ายและไม่บังคับให้จำ manual steps
 - start/cleanup script ควรหา root ของโปรเจกต์เองได้ เพื่อให้เรียกจาก root repo หรือโฟลเดอร์ `scripts/` บน Windows ได้เหมือนกัน
