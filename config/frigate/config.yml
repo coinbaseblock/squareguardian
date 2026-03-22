@@ -37,13 +37,17 @@ go2rtc:
   streams:
     cam_front:
       - "{FRIGATE_CAMERA_FRONT_RTSP_URL}"
+    cam_front_live:
+      # Some cameras expose H.265/HEVC by default. Browsers often show the
+      # first frame and then go black, so transcode the UI live stream to H.264.
+      - "ffmpeg:cam_front#video=h264"
 
 cameras:
   cam_front:
     enabled: true
     live:
       streams:
-        main: cam_front
+        main: cam_front_live
     detect:
       enabled: true
       width: 1280

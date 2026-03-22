@@ -28,6 +28,7 @@ TP-Link Tapo RTSP Camera
 เครื่องมือเริ่มต้น:
 
 - Frigate
+- go2rtc restream สำหรับแยก stream ตรวจจับออกจาก stream live view ที่ browser เล่นได้ง่ายกว่า
 
 สถานะ:
 
