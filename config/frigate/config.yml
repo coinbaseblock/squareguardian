@@ -34,7 +34,7 @@ detectors:
     type: cpu
 
 cameras:
-  tapo_front:
+  cam_front:
     enabled: true
     detect:
       enabled: true
@@ -43,7 +43,7 @@ cameras:
       fps: 5
     ffmpeg:
       inputs:
-        - path: "{FRIGATE_TAPO_RTSP_URL}"
+        - path: "{CAMERA_FRONT_RTSP_URL}"
           roles:
             - detect
     motion:

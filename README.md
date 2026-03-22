@@ -2,7 +2,7 @@
 
 SpaceGuardian คือชุดเริ่มต้นสำหรับทำระบบกล้อง AI แบบ **เปิดง่าย ใช้งานง่ายก่อน** โดยโฟกัสที่ local pilot 1 กล้องผ่าน RTSP เหมาะกับบ้าน หน้าร้าน ออฟฟิศ หรือประตูเข้าออกเล็ก ๆ.
 
-รอบนี้เตรียม preset แบบง่ายสำหรับกล้อง **TP-Link Tapo** ผ่าน Frigate + Docker Compose โดยไม่ commit credential กล้องลง repo.
+ใช้ได้กับกล้อง RTSP **ทุกยี่ห้อ** (Tapo, Hikvision, Dahua, Reolink ฯลฯ) ผ่าน Frigate + Docker Compose โดยไม่ commit credential กล้องลง repo.
 
 ## สิ่งที่ได้ใน MVP ชุดนี้
 
@@ -35,7 +35,7 @@ spaceguardian/
   docs/
 ```
 
-## Quick start สำหรับ TP-Link Tapo
+## Quick start
 
 ### 1) สร้างไฟล์ `.env`
 
@@ -46,11 +46,16 @@ cp .env.example .env
 จากนั้นแก้ `.env` ให้เป็น RTSP จริงของคุณ เช่น
 
 ```env
-FRIGATE_TAPO_RTSP_URL=rtsp://username:password@192.168.1.50/stream1
+# ใส่ RTSP URL ของกล้องคุณ (ยี่ห้อไหนก็ได้)
+CAMERA_FRONT_RTSP_URL=rtsp://username:password@192.168.1.50/stream1
 FRIGATE_TIMEZONE=Asia/Bangkok
 ```
 
-ถ้าคุณใช้ Tapo main stream ส่วนใหญ่จะเป็น path ประมาณ `/stream1`.
+ตัวอย่าง RTSP URL แต่ละยี่ห้อ:
+- **Tapo:** `rtsp://user:pass@IP/stream1`
+- **Hikvision:** `rtsp://admin:pass@IP:554/Streaming/Channels/101`
+- **Dahua:** `rtsp://admin:pass@IP:554/cam/realmonitor?channel=1&subtype=0`
+- **Reolink:** `rtsp://admin:pass@IP:554/h264Preview_01_main`
 
 > เพื่อความปลอดภัย อย่า commit `.env` เพราะไฟล์นี้เก็บ credential กล้องจริง
 
@@ -202,7 +207,7 @@ SpaceGuardian ควรโตตามลำดับนี้:
 
 ## ข้อเสนอแนะถัดไป
 
-ถ้าชุดนี้รันผ่านและภาพ Tapo ขึ้นแล้ว งานถัดไปที่ควรทำมี 3 อย่าง:
+ถ้าชุดนี้รันผ่านและภาพกล้องขึ้นแล้ว งานถัดไปที่ควรทำมี 3 อย่าง:
 
 1. เพิ่ม `parking` และ `gate` zones สำหรับรถ
 2. เพิ่ม notifier ง่าย ๆ เช่น LINE / Telegram จาก event ที่เข้า zone

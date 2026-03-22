@@ -64,7 +64,7 @@ data/
 ```json
 {
   "event_id": "evt_20260321_001",
-  "camera": "tapo_front",
+  "camera": "cam_front",
   "zone": "front_door",
   "event_type": "person_detected",
   "timestamp": "2026-03-21T08:41:15+07:00",
@@ -77,7 +77,7 @@ data/
 ```json
 {
   "event_id": "veh_20260321_001",
-  "camera": "tapo_front",
+  "camera": "cam_front",
   "zone": "gate",
   "event_type": "vehicle_detected",
   "vehicle_type": "car",
@@ -91,7 +91,7 @@ data/
 ```json
 {
   "event_id": "alert_20260321_015",
-  "camera": "tapo_front",
+  "camera": "cam_front",
   "zone": "front_door",
   "event_type": "person_in_zone",
   "severity": "medium",

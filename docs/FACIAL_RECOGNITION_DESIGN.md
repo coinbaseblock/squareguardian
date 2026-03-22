@@ -4,13 +4,13 @@
 
 SpaceGuardian จะมีระบบ Facial Recognition แบบ **Local-first** โดยมีแนวทางหลัก:
 
-1. **SpaceGuardian FR** — ระบบจดจำใบหน้าของเราเอง (InsightFace/ArcFace) รันบน server
-2. **Tapo ONVIF Trigger** — ใช้ ONVIF person detection จาก Tapo เป็น trigger เพื่อลด processing
+1. **SpaceGuardian FR (หลัก)** — ระบบจดจำใบหน้าของเราเอง (InsightFace/ArcFace) รันบน server — ใช้ได้กับ **ทุกกล้อง RTSP**
+2. **ONVIF Trigger (เสริม)** — ใช้ ONVIF person detection เป็น trigger ช่วยลด CPU load — รองรับกล้องทุกยี่ห้อที่มี ONVIF
 3. **Tapo FR Bridge (อนาคต)** — ดึงผล face recognition จาก Tapo (รอ API เปิด)
 
-> **ข้อค้นพบสำคัญ:** Tapo ที่มี facial recognition (C260, C560WS, H500 hub) **ไม่เปิด API**
-> ให้ดึงผลจดจำใบหน้าได้ — ทั้ง ONVIF, pytapo, และ REST API ยังไม่รองรับ
-> ดังนั้นแนวทางหลักคือ **สร้างระบบ FR ของเราเอง** ที่ใช้ได้กับทุกกล้อง RTSP
+> **หลักการสำคัญ:** SpaceGuardian FR ทำได้เองทั้งหมด ไม่ต้องพึ่งกล้องยี่ห้อใดยี่ห้อหนึ่ง
+> ONVIF trigger เป็นแค่ **ตัวเสริม** ที่ช่วยลด CPU load — ไม่จำเป็นต้องมี ระบบทำงานได้ครบโดยไม่ต้องใช้
+> กล้องที่มี ONVIF (Tapo, Hikvision, Dahua ฯลฯ) จะได้ประโยชน์เพิ่มจาก trigger แต่กล้องที่ไม่มี ONVIF ก็ใช้ได้ปกติ
 
 ---
 
@@ -36,13 +36,14 @@ SpaceGuardian จะมีระบบ Facial Recognition แบบ **Local-firs
                     │  ┌─────────────┐  ┌──────────────┐  │
                     │  │ Frigate     │  │ ONVIF Person │  │
                     │  │ person event│  │ Detection    │  │
-                    │  │ (primary)   │  │ (secondary)  │  │
+                    │  │ (หลัก)      │  │ (เสริม)       │  │
                     │  └──────┬──────┘  └──────┬───────┘  │
                     └─────────┼────────────────┼──────────┘
-                              │                │
+                              │          (ไม่จำเป็น)
                     ┌─────────▼────────────────▼──────────┐
                     │     RTSP Stream จากกล้องทุกยี่ห้อ     │
                     │     (Tapo, Hikvision, Dahua, ฯลฯ)   │
+                    │     ใช้ได้แม้ไม่มี ONVIF              │
                     └────────────────────────────────────┘
 ```
 
@@ -186,7 +187,11 @@ User groups events as "สมชาย"
 
 ---
 
-## Part 2: Tapo Integration — สิ่งที่ทำได้จริงตอนนี้
+## Part 2: ONVIF Trigger (ตัวเสริม — ไม่จำเป็น)
+
+> **หลักการ:** SpaceGuardian FR ทำ face recognition ได้เองทั้งหมดผ่าน Frigate + RTSP
+> ONVIF trigger เป็นแค่ **ตัวช่วยเสริม** ที่ลด CPU load เมื่อกล้องรองรับ
+> ระบบทำงานได้ครบสมบูรณ์แม้ไม่มี ONVIF
 
 ### สถานะ Facial Recognition ของ Tapo (ข้อเท็จจริง)
 
@@ -206,24 +211,26 @@ User groups events as "สมชาย"
 > - REST API ของ Tapo ยังไม่ถูก reverse-engineer ส่วน face recognition
 > - HomeAssistant-Tapo-Control มี [feature request #1043](https://github.com/JurajNyiri/HomeAssistant-Tapo-Control/issues/1043) แต่ยังไม่ implement
 
-### สิ่งที่ดึงจาก Tapo ได้จริงตอนนี้
+### สิ่งที่ ONVIF trigger ช่วยได้ (ตัวเสริม)
 
-#### 1. ONVIF Person Detection → ใช้เป็น Trigger
+#### ONVIF Person Detection → ใช้เป็น Trigger ลด CPU
 
-Tapo ส่ง ONVIF events ได้ผ่าน port 2020:
+กล้องที่รองรับ ONVIF สามารถส่ง person detection event ได้:
 
 ```text
-ONVIF Event Topics ที่ Tapo รองรับ:
+ONVIF Event Topics (มาตรฐาน — ใช้ได้ทุกยี่ห้อที่รองรับ ONVIF):
   tns1:RuleEngine/CellMotionDetector/Motion    → IsMotion (boolean)
   tns1:RuleEngine/PeopleDetector/People        → IsPeople (boolean)
   tns1:RuleEngine/LineCrossDetector/LineCross  → IsLineCross (boolean)
   tns1:RuleEngine/TamperDetector/Tamper        → IsTamper (boolean)
+
+ตัวอย่างกล้องที่รองรับ: Tapo (port 2020), Hikvision, Dahua, Reolink ฯลฯ
 ```
 
-**ใช้ IsPeople เป็น trigger** → เมื่อ Tapo detect person → grab RTSP frame → ส่งให้ SpaceGuardian FR ทำ face recognition:
+**ใช้ IsPeople เป็น trigger** → เมื่อกล้อง detect person → grab RTSP frame → ส่งให้ SpaceGuardian FR:
 
 ```text
-Tapo Camera (ONVIF port 2020)
+กล้อง RTSP + ONVIF
   │
   ├── IsPeople = true  ──────────┐
   │                               ▼
@@ -235,9 +242,19 @@ Tapo Camera (ONVIF port 2020)
   │                    "สมชาย" (similarity: 0.87)
 ```
 
-> **หมายเหตุ:** ต้องเปิด Motion Detection ใน Tapo App ด้วย มิฉะนั้น ONVIF person event จะไม่ถูกส่ง (known firmware bug)
+**สำคัญ: ถ้ากล้องไม่มี ONVIF** ระบบยังทำงานได้ปกติ — Frigate จะทำ person detection เองแล้ว trigger FR ให้
 
-#### 2. pytapo — ตั้งค่า detection config
+> **หมายเหตุ Tapo:** ต้องเปิด Motion Detection ใน Tapo App ด้วย มิฉะนั้น ONVIF person event จะไม่ถูกส่ง (known firmware bug)
+
+#### RTSP Stream → ช่องทางหลักสำหรับ FR
+
+ช่องทางหลักที่ reliable ที่สุดคือดึง RTSP stream แล้วรัน face recognition ของเราเอง — ใช้ได้กับทุกกล้อง:
+
+```text
+กล้อง RTSP (ยี่ห้อใดก็ได้)  →  Frigate  →  face-service
+```
+
+#### pytapo — ตั้งค่า Tapo detection (เสริม เฉพาะ Tapo)
 
 ```python
 from pytapo import Tapo
@@ -253,30 +270,21 @@ info = camera.getBasicInfo()
 pytapo ทำได้: ตั้งค่า detection, ดูข้อมูลกล้อง, pan/tilt, privacy mode
 pytapo ทำ **ไม่ได้**: ดึงผล face recognition, ดึง face events
 
-#### 3. RTSP Stream → ตัวหลักสำหรับ FR
+### ONVIF Trigger Service (Optional — ช่วยลด CPU)
 
-ช่องทางที่ reliable ที่สุดคือดึง RTSP stream แล้วรัน face recognition ของเราเอง:
-
-```text
-rtsp://username:password@192.168.1.50/stream1  →  Frigate  →  face-service
-```
-
-### Tapo ONVIF Trigger Service (ทำได้เลย)
-
-แทนที่จะเป็น "Tapo FR Bridge" ที่ดึง face data จาก Tapo (ซึ่งทำไม่ได้)
-เราจะทำ **ONVIF Trigger Service** ที่ใช้ Tapo person detection เป็น trigger แทน:
+Service เสริมที่ subscribe ONVIF events จากกล้อง — **ไม่จำเป็นต้องมี** แต่ช่วยลด CPU:
 
 ```yaml
-# เพิ่มใน docker-compose.yml (optional — ลด CPU load)
+# เพิ่มใน docker-compose.yml (optional — เสริม ลด CPU load)
 onvif-trigger:
   build:
     context: ./services/onvif-trigger
     dockerfile: Dockerfile
   environment:
-    - CAMERA_HOST=${TAPO_CAMERA_HOST}
-    - ONVIF_PORT=2020
-    - ONVIF_USER=${TAPO_CAMERA_USER}
-    - ONVIF_PASS=${TAPO_CAMERA_PASS}
+    - CAMERA_HOST=${CAMERA_FRONT_HOST}
+    - ONVIF_PORT=${ONVIF_PORT:-2020}         # Tapo=2020, อื่นๆ=80
+    - ONVIF_USER=${CAMERA_FRONT_USER}
+    - ONVIF_PASS=${CAMERA_FRONT_PASS}
     - FACE_SERVICE_URL=http://face-service:8082
     - SPACEGUARDIAN_URL=http://squareguardian:8080
   depends_on:
@@ -284,7 +292,8 @@ onvif-trigger:
   restart: unless-stopped
 ```
 
-**ข้อดี:** ลด CPU load — ไม่ต้องรัน face detection ตลอดเวลา แค่รันเมื่อ Tapo detect person
+**ข้อดี:** ลด CPU load — ไม่ต้อง process ทุก frame แค่รันเมื่อกล้อง detect person
+**ไม่จำเป็น:** Frigate ทำ person detection ได้เองอยู่แล้ว — ONVIF trigger แค่ช่วยให้เร็วขึ้นและประหยัด CPU
 
 ### อนาคต: Tapo FR Bridge (เมื่อ API เปิด)
 
@@ -378,23 +387,24 @@ onvif-trigger:
 ระยะเวลาโดยประมาณ: 1-2 สัปดาห์
 ```
 
-### Phase 3B: ONVIF Trigger + Smart Processing (เสริม)
+### Phase 3B: ONVIF Trigger + Smart Processing (เสริม — ไม่จำเป็น)
 
 ```
 สิ่งที่ทำ:
   ✦ สร้าง onvif-trigger service (optional)
-  ✦ Subscribe ONVIF IsPeople event จาก Tapo
-  ✦ เมื่อ Tapo detect person → trigger face-service ทำ FR
-  ✦ ลด CPU load (ไม่ต้อง process ทุก frame)
+  ✦ Subscribe ONVIF IsPeople event จากกล้องที่รองรับ (Tapo, Hikvision, Dahua ฯลฯ)
+  ✦ เมื่อกล้อง detect person → trigger face-service ทำ FR
+  ✦ ช่วยลด CPU load (ไม่ต้อง process ทุก frame)
 
 ผลลัพธ์:
-  → ใช้ person detection ของ Tapo เป็น trigger (ฟรี ไม่เสีย server resource)
+  → กล้องที่มี ONVIF ช่วย trigger ได้ → ประหยัด CPU
+  → กล้องที่ไม่มี ONVIF → ใช้ Frigate person detection แทน (ทำงานเหมือนกัน)
   → face-service รันเฉพาะเมื่อมีคนจริงๆ
-  → รองรับกล้อง ONVIF ยี่ห้ออื่นด้วย
 
-หมายเหตุ:
-  → Frigate ทำ person detection ได้อยู่แล้ว service นี้จึง optional
-  → มีประโยชน์เมื่อต้องการลด CPU load บน server
+หลักการ:
+  → SpaceGuardian FR ทำได้เองทั้งหมดอยู่แล้ว
+  → ONVIF trigger เป็นแค่ตัวช่วยเสริม ไม่ใช่ตัวแทนที่
+  → ไม่มี ONVIF ก็ไม่เสียอะไร ระบบทำงานครบ
 ```
 
 ### Phase 3C: Unified Identity + Auto-learning
@@ -426,11 +436,12 @@ squareguardian/
 │   │   ├── embedding_store.py         # SQLite operations
 │   │   └── models/                    # downloaded ONNX models (gitignored)
 │   │
-│   └── onvif-trigger/                 # ONVIF person detection trigger (optional)
+│   └── onvif-trigger/                 # ONVIF trigger (เสริม — ไม่จำเป็น)
 │       ├── Dockerfile
 │       ├── requirements.txt           # onvif-zeep, requests
 │       ├── main.py                    # ONVIF event subscription loop
 │       └── trigger.py                 # trigger face-service on person event
+│       # รองรับกล้อง ONVIF ทุกยี่ห้อ (Tapo, Hikvision, Dahua ฯลฯ)
 │
 ├── storage/
 │   └── face-db/                       # SQLite + face data
@@ -458,10 +469,11 @@ squareguardian/
 
 ### กลยุทธ์ที่ใช้ได้จริงตอนนี้
 
-- **SpaceGuardian FR เป็นหลัก** → ทำ face recognition ทั้งหมดบน server ของเรา
-- **Tapo ช่วยเป็น trigger** → ONVIF IsPeople event ลด unnecessary processing
+- **SpaceGuardian FR ทำได้เองทั้งหมด** → face recognition ครบบน server ของเรา ใช้กับทุกกล้อง RTSP
+- **ONVIF เป็นแค่ตัวเสริม** → ช่วยลด CPU load แต่ไม่จำเป็น ไม่แทนที่ระบบหลัก
 - **Frigate เป็น backbone** → person detection + snapshot + event management
-- **ไม่ต้องพึ่ง Tapo FR** → ระบบทำงานได้ครบโดยไม่ต้องอาศัย Tapo AI เลย
+- **Camera-agnostic** → ไม่ผูกกับยี่ห้อใดยี่ห้อหนึ่ง กล้อง RTSP ทุกยี่ห้อใช้ได้
+- **กล้องไม่มี ONVIF ก็ใช้ได้** → Frigate ทำ person detection เอง ONVIF แค่ช่วยเสริม
 - **เตรียม interface ไว้** → เมื่อ Tapo เปิด API ในอนาคต สามารถ plug-in ได้ทันที
 
 ---
@@ -481,13 +493,18 @@ squareguardian/
 - เพียงพอสำหรับ 1-5 กล้อง ถ้ามากกว่านี้แนะนำ GPU
 - Tapo FR ไม่ใช้ resource ของ server เลย → ช่วยลด load
 
-### ข้อจำกัดของ Tapo Integration
+### ข้อจำกัดของ ONVIF Trigger
+
+- ONVIF ส่งแค่ boolean person detection ไม่มี face identity data → เป็นได้แค่ **trigger** ไม่ใช่ **source** ของ FR
+- ไม่จำเป็นต้องมี — Frigate ทำ person detection ได้เองอยู่แล้ว
+- ONVIF port แตกต่างกันในแต่ละยี่ห้อ (Tapo=2020, Hikvision/Dahua=80)
+- กล้องบางรุ่นอาจต้องเปิด settings เพิ่ม เช่น Tapo ต้องเปิด Motion Detection ใน App ด้วย
+
+### ข้อจำกัดของ Tapo FR (ข้อมูลเพิ่มเติม)
 
 - Tapo **ไม่เปิด API** สำหรับ facial recognition results (walled garden)
 - pytapo ทำได้แค่ตั้งค่า detection config ไม่สามารถดึง face identity
-- ONVIF ส่งแค่ boolean person detection ไม่มี face identity data
-- ONVIF person events มี bug: ต้องเปิด Motion Detection ใน Tapo App ด้วย
-- ดังนั้น Tapo ใช้เป็น **trigger** ได้ แต่ไม่ใช่ **source** ของ face recognition
+- ดังนั้นเราจึง **สร้าง FR ของเราเอง** ที่ใช้ได้กับทุกกล้อง
 - ติดตาม [HomeAssistant-Tapo-Control #1043](https://github.com/JurajNyiri/HomeAssistant-Tapo-Control/issues/1043) สำหรับ updates
 
 ---
@@ -496,9 +513,9 @@ squareguardian/
 
 | สิ่งที่ได้ | รายละเอียด |
 |-----------|-----------|
-| **ระบบของเรา** | Face recognition ที่ใช้กับทุกกล้อง ควบคุมได้เต็มที่ |
-| **ใช้ Tapo เป็น trigger** | ONVIF person detection ลด unnecessary processing |
+| **ระบบของเราทำได้เองทั้งหมด** | FR ครบบน server ใช้กับทุกกล้อง RTSP ควบคุมได้เต็มที่ |
+| **ONVIF เป็นแค่เสริม** | ช่วยลด CPU load แต่ไม่จำเป็น ไม่แทนที่ระบบหลัก |
+| **Camera-agnostic** | ไม่ผูกกับยี่ห้อใด กล้อง RTSP ทุกยี่ห้อใช้ได้ |
 | **Unified Registry** | ข้อมูลจากทุก source รวมที่เดียว |
-| **Progressive** | เริ่มจาก face-service ก่อน → เพิ่ม Tapo bridge ทีหลัง |
+| **Progressive** | เริ่มจาก face-service ก่อน → เพิ่ม ONVIF trigger ทีหลัง (optional) |
 | **Privacy-first** | ข้อมูลอยู่ local ทั้งหมด |
-| **Extensible** | เพิ่มกล้องยี่ห้ออื่นได้ + plug-in Tapo FR เมื่อ API เปิดในอนาคต |
