@@ -13,11 +13,13 @@ services:
       - "8554:8554"
       - "8555:8555/tcp"
       - "8555:8555/udp"
+      # Optional go2rtc debug UI / stream inspector.
+      - "1984:1984"
     environment:
-      CAMERA_FRONT_RTSP_URL: ${CAMERA_FRONT_RTSP_URL}
-      FRIGATE_TIMEZONE: ${FRIGATE_TIMEZONE:-Asia/Bangkok}
-      FRIGATE_DEFAULT_USER: ${FRIGATE_DEFAULT_USER:-admin}
-      FRIGATE_DEFAULT_PASSWORD: ${FRIGATE_DEFAULT_PASSWORD:-SpaceGuardian2026}
+      # Frigate only substitutes env vars in config when they use the
+      # FRIGATE_ prefix, so expose the camera URL with that name.
+      FRIGATE_CAMERA_FRONT_RTSP_URL: ${CAMERA_FRONT_RTSP_URL}
+      TZ: ${FRIGATE_TIMEZONE:-Asia/Bangkok}
     volumes:
       - ./config/frigate:/config
       - ./storage/frigate:/media/frigate
