@@ -11,10 +11,10 @@
 # ---------------------------------------------------------------------------
 # Stage 1: deps — Go module cache (rarely changes)
 # ---------------------------------------------------------------------------
-FROM golang:1.23-bookworm AS deps
+FROM golang:1.25-bookworm AS deps
 
 WORKDIR /src
-COPY go.mod go.sum ./
+COPY go.mod ./
 RUN go mod download
 
 # ---------------------------------------------------------------------------

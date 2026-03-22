@@ -78,6 +78,10 @@ docker compose logs -f frigate
 - มี zone ตัวอย่าง `front_door`
 - ใช้ CPU detector เป็นค่าเริ่มต้นเพื่อให้เริ่มได้แม้ยังไม่มี accelerator
 
+## หมายเหตุเรื่องการ build Docker
+
+ตอนนี้ service `squareguardian` ใช้เฉพาะ Go standard library จึงอาจยังไม่มีไฟล์ `go.sum` ใน repo ได้ตามปกติ. Docker build ถูกตั้งให้ใช้ `go.mod` ได้โดยตรง และใช้ Go 1.25 ให้ตรงกับเวอร์ชันที่ระบุใน module.
+
 ## ถ้าจะปรับให้เหมาะกับจุดติดตั้งจริง
 
 แนะนำให้ปรับ 3 อย่างก่อน:
