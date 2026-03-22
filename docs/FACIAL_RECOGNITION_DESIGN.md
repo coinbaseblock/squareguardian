@@ -2,12 +2,15 @@
 
 ## ภาพรวม
 
-SpaceGuardian จะมีระบบ Facial Recognition แบบ **Local-first** สองแนวทางที่ทำงานร่วมกัน:
+SpaceGuardian จะมีระบบ Facial Recognition แบบ **Local-first** โดยมีแนวทางหลัก:
 
-1. **SpaceGuardian FR** — ระบบจดจำใบหน้าของเราเอง (InsightFace/FaceNet) รันบน server
-2. **Tapo FR Bridge** — ดึงผลจดจำใบหน้าจากกล้อง Tapo ที่มี AI ในตัว (C225, C325WB ฯลฯ)
+1. **SpaceGuardian FR** — ระบบจดจำใบหน้าของเราเอง (InsightFace/ArcFace) รันบน server
+2. **Tapo ONVIF Trigger** — ใช้ ONVIF person detection จาก Tapo เป็น trigger เพื่อลด processing
+3. **Tapo FR Bridge (อนาคต)** — ดึงผล face recognition จาก Tapo (รอ API เปิด)
 
-ทั้งสองระบบจะ feed เข้า **Unified Identity Registry** เดียวกัน ทำให้ผู้ใช้ได้ประโยชน์จากทั้งสองฝั่ง
+> **ข้อค้นพบสำคัญ:** Tapo ที่มี facial recognition (C260, C560WS, H500 hub) **ไม่เปิด API**
+> ให้ดึงผลจดจำใบหน้าได้ — ทั้ง ONVIF, pytapo, และ REST API ยังไม่รองรับ
+> ดังนั้นแนวทางหลักคือ **สร้างระบบ FR ของเราเอง** ที่ใช้ได้กับทุกกล้อง RTSP
 
 ---
 
@@ -17,22 +20,30 @@ SpaceGuardian จะมีระบบ Facial Recognition แบบ **Local-firs
                     ┌─────────────────────────────────────┐
                     │        Unified Identity Registry     │
                     │   (embedding store + person profile) │
-                    └──────────┬──────────┬───────────────┘
-                               │          │
-              ┌────────────────▼──┐   ┌───▼─────────────────┐
-              │  SpaceGuardian FR │   │   Tapo FR Bridge     │
-              │  (Self-hosted)    │   │   (Camera-native)    │
-              │                   │   │                      │
-              │  InsightFace /    │   │  pytapo / ONVIF      │
-              │  FaceNet          │   │  event polling       │
-              │  face-api         │   │                      │
-              └────────┬─────────┘   └───────┬──────────────┘
-                       │                     │
-              ┌────────▼─────────┐   ┌───────▼──────────────┐
-              │  RTSP Stream     │   │  Tapo Camera         │
-              │  via Frigate     │   │  (C225/C325WB)       │
-              │  (snapshot/crop) │   │  Built-in AI chip    │
-              └──────────────────┘   └──────────────────────┘
+                    └──────────────────┬──────────────────┘
+                                       │
+                          ┌────────────▼────────────┐
+                          │    SpaceGuardian FR      │
+                          │    (Self-hosted)         │
+                          │                          │
+                          │  InsightFace / ArcFace   │
+                          │  ONNX Runtime            │
+                          └────────────┬────────────┘
+                                       │
+                    ┌──────────────────▼──────────────────┐
+                    │          Trigger Sources             │
+                    │                                     │
+                    │  ┌─────────────┐  ┌──────────────┐  │
+                    │  │ Frigate     │  │ ONVIF Person │  │
+                    │  │ person event│  │ Detection    │  │
+                    │  │ (primary)   │  │ (secondary)  │  │
+                    │  └──────┬──────┘  └──────┬───────┘  │
+                    └─────────┼────────────────┼──────────┘
+                              │                │
+                    ┌─────────▼────────────────▼──────────┐
+                    │     RTSP Stream จากกล้องทุกยี่ห้อ     │
+                    │     (Tapo, Hikvision, Dahua, ฯลฯ)   │
+                    └────────────────────────────────────┘
 ```
 
 ---
@@ -135,7 +146,7 @@ POST /api/face/compare
 CREATE TABLE persons (
     id          TEXT PRIMARY KEY,    -- "p-001"
     name        TEXT NOT NULL,
-    source      TEXT DEFAULT 'manual', -- 'manual' | 'tapo' | 'auto'
+    source      TEXT DEFAULT 'manual', -- 'manual' | 'group' | 'auto'
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -144,7 +155,7 @@ CREATE TABLE face_embeddings (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     person_id   TEXT REFERENCES persons(id),
     embedding   BLOB NOT NULL,       -- 512-dim float32 = 2048 bytes
-    source      TEXT DEFAULT 'manual', -- 'manual' | 'frigate' | 'tapo'
+    source      TEXT DEFAULT 'manual', -- 'manual' | 'frigate' | 'group'
     quality     REAL,                -- face quality score 0-1
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -175,83 +186,97 @@ User groups events as "สมชาย"
 
 ---
 
-## Part 2: Tapo FR Bridge (ดึงจากกล้อง Tapo)
+## Part 2: Tapo Integration — สิ่งที่ทำได้จริงตอนนี้
 
-### Tapo Camera ที่รองรับ Face Recognition
+### สถานะ Facial Recognition ของ Tapo (ข้อเท็จจริง)
 
-| รุ่น | Face Detection | Face Recognition | AI Chip |
-|------|---------------|-----------------|---------|
-| C225 | ✅ | ✅ (ตั้งชื่อได้ 50 คน) | ในตัว |
-| C325WB | ✅ | ✅ | ในตัว |
-| C720 | ✅ | ✅ | ในตัว |
-| TC72 | ✅ | ❌ (detect อย่างเดียว) | ในตัว |
-| TC70 | ❌ | ❌ | ไม่มี |
+| รุ่น | Person Detection | Face Recognition | API เปิดให้ดึง FR? |
+|------|-----------------|-----------------|-------------------|
+| C260 | ✅ | ✅ | ❌ ไม่เปิด |
+| C560WS | ✅ | ✅ | ❌ ไม่เปิด |
+| H500 hub | ✅ (6 กล้อง) | ✅ | ❌ ไม่เปิด |
+| C225 | ✅ | ❌ | — |
+| C325WB | ✅ | ❌ | — |
+| TC72 | ✅ | ❌ | — |
+| TC70 | ✅ (basic) | ❌ | — |
 
-### วิธีดึงข้อมูล Face Recognition จาก Tapo
+> **ข้อจำกัดสำคัญ:** Tapo **ไม่เปิด API** สำหรับดึงผล facial recognition
+> - pytapo ไม่มี method สำหรับ face recognition data
+> - ONVIF ของ Tapo ส่งแค่ person/motion detection events ไม่มี face identity
+> - REST API ของ Tapo ยังไม่ถูก reverse-engineer ส่วน face recognition
+> - HomeAssistant-Tapo-Control มี [feature request #1043](https://github.com/JurajNyiri/HomeAssistant-Tapo-Control/issues/1043) แต่ยังไม่ implement
 
-Tapo ใช้ **proprietary protocol** (ไม่ใช่ ONVIF มาตรฐาน) แต่มี library ที่ reverse engineer ได้แล้ว:
+### สิ่งที่ดึงจาก Tapo ได้จริงตอนนี้
 
-#### ช่องทางที่ 1: pytapo (Python library)
+#### 1. ONVIF Person Detection → ใช้เป็น Trigger
+
+Tapo ส่ง ONVIF events ได้ผ่าน port 2020:
+
+```text
+ONVIF Event Topics ที่ Tapo รองรับ:
+  tns1:RuleEngine/CellMotionDetector/Motion    → IsMotion (boolean)
+  tns1:RuleEngine/PeopleDetector/People        → IsPeople (boolean)
+  tns1:RuleEngine/LineCrossDetector/LineCross  → IsLineCross (boolean)
+  tns1:RuleEngine/TamperDetector/Tamper        → IsTamper (boolean)
+```
+
+**ใช้ IsPeople เป็น trigger** → เมื่อ Tapo detect person → grab RTSP frame → ส่งให้ SpaceGuardian FR ทำ face recognition:
+
+```text
+Tapo Camera (ONVIF port 2020)
+  │
+  ├── IsPeople = true  ──────────┐
+  │                               ▼
+  │                    SpaceGuardian FR
+  │                    face-service
+  ├── RTSP stream ──────────────▶ crop face + identify
+  │                               │
+  │                               ▼
+  │                    "สมชาย" (similarity: 0.87)
+```
+
+> **หมายเหตุ:** ต้องเปิด Motion Detection ใน Tapo App ด้วย มิฉะนั้น ONVIF person event จะไม่ถูกส่ง (known firmware bug)
+
+#### 2. pytapo — ตั้งค่า detection config
 
 ```python
 from pytapo import Tapo
 
 camera = Tapo("192.168.1.50", "admin", "camera_password")
 
-# ดึงรายชื่อคนที่กล้องจำได้
-faces = camera.getAIFaceList()
-# Returns: [{"id": 1, "name": "สมชาย", "photo": <bytes>}, ...]
-
-# ดึง detection events
-events = camera.getDetectionEvents()
-# Returns events ที่มี face_id ถ้าจำได้
-
-# ดึง notification events (รวม face recognition)
-notifications = camera.getNotifications(start_time, end_time)
+# ดึงและตั้งค่า person detection (config เท่านั้น ไม่ใช่ผลลัพธ์)
+config = camera.getPersonDetectionConfig()
+camera.setMotionDetection(True, "high")
+info = camera.getBasicInfo()
 ```
 
-#### ช่องทางที่ 2: ONVIF Event Subscription
+pytapo ทำได้: ตั้งค่า detection, ดูข้อมูลกล้อง, pan/tilt, privacy mode
+pytapo ทำ **ไม่ได้**: ดึงผล face recognition, ดึง face events
 
-Tapo รุ่นใหม่รองรับ ONVIF profile S บางส่วน:
+#### 3. RTSP Stream → ตัวหลักสำหรับ FR
 
-```python
-from onvif import ONVIFCamera
+ช่องทางที่ reliable ที่สุดคือดึง RTSP stream แล้วรัน face recognition ของเราเอง:
 
-cam = ONVIFCamera("192.168.1.50", 2020, "admin", "password")
-event_service = cam.create_events_service()
-
-# Subscribe to motion/face events
-# Tapo จะส่ง event เมื่อ detect/recognize face
-pullpoint = event_service.CreatePullPointSubscription()
+```text
+rtsp://username:password@192.168.1.50/stream1  →  Frigate  →  face-service
 ```
 
-> **ข้อจำกัด:** ONVIF ของ Tapo ส่งแค่ event notification ไม่ส่ง face identity data ผ่าน ONVIF ต้องใช้ pytapo เพื่อดึง face identity
+### Tapo ONVIF Trigger Service (ทำได้เลย)
 
-#### ช่องทางที่ 3: Tapo HTTPS API (Direct)
-
-```
-POST https://192.168.1.50/stok=<token>/ds
-{
-  "method": "get",
-  "ai_detection": {
-    "name": ["face_recognition"]
-  }
-}
-```
-
-### Tapo FR Bridge Service
+แทนที่จะเป็น "Tapo FR Bridge" ที่ดึง face data จาก Tapo (ซึ่งทำไม่ได้)
+เราจะทำ **ONVIF Trigger Service** ที่ใช้ Tapo person detection เป็น trigger แทน:
 
 ```yaml
-# เพิ่มใน docker-compose.yml
-tapo-bridge:
+# เพิ่มใน docker-compose.yml (optional — ลด CPU load)
+onvif-trigger:
   build:
-    context: ./services/tapo-bridge
+    context: ./services/onvif-trigger
     dockerfile: Dockerfile
   environment:
-    - TAPO_HOST=${TAPO_CAMERA_HOST}
-    - TAPO_USER=${TAPO_CAMERA_USER}
-    - TAPO_PASS=${TAPO_CAMERA_PASS}
-    - POLL_INTERVAL=5               # วินาที
+    - CAMERA_HOST=${TAPO_CAMERA_HOST}
+    - ONVIF_PORT=2020
+    - ONVIF_USER=${TAPO_CAMERA_USER}
+    - ONVIF_PASS=${TAPO_CAMERA_PASS}
     - FACE_SERVICE_URL=http://face-service:8082
     - SPACEGUARDIAN_URL=http://squareguardian:8080
   depends_on:
@@ -259,30 +284,22 @@ tapo-bridge:
   restart: unless-stopped
 ```
 
-### Tapo Bridge Flow
+**ข้อดี:** ลด CPU load — ไม่ต้องรัน face detection ตลอดเวลา แค่รันเมื่อ Tapo detect person
+
+### อนาคต: Tapo FR Bridge (เมื่อ API เปิด)
+
+เก็บ design ไว้สำหรับอนาคต — ถ้า pytapo หรือ community reverse-engineer ได้:
 
 ```text
-┌────────────────────────────────────────────────────────┐
-│                   Tapo FR Bridge                        │
-│                                                        │
-│  1. Poll Tapo camera ทุก N วินาที                       │
-│     └── pytapo.getDetectionEvents()                    │
-│     └── pytapo.getAIFaceList()                         │
-│                                                        │
-│  2. เมื่อได้ face event:                                │
-│     ├── ถ้า Tapo จำได้ (มี face_id + name):             │
-│     │   └── Sync ไปยัง Unified Registry                │
-│     │       POST /api/face/register-from-tapo           │
-│     │       { tapo_face_id: 1, name: "สมชาย" }         │
-│     │                                                  │
-│     └── ถ้า Tapo จำไม่ได้ (unknown face):               │
-│         └── ส่งภาพไป face-service ให้ลอง match          │
-│             POST /api/face/identify { image: <crop> }   │
-│                                                        │
-│  3. อัปเดต SpaceGuardian event                          │
-│     └── POST /api/annotate                             │
-│         { event_id, identity, source: "tapo" }         │
-└────────────────────────────────────────────────────────┘
+สิ่งที่ต้องรอ:
+  ⏳ pytapo เพิ่ม getAIFaceList() / getFaceRecognitionEvents()
+  ⏳ HomeAssistant-Tapo-Control issue #1043 ถูก implement
+  ⏳ TP-Link เปิด official API (ไม่น่าจะเกิดเร็ว)
+
+เมื่อพร้อม → สร้าง tapo-bridge service ที่:
+  1. ดึง face recognition results จาก Tapo
+  2. Sync ชื่อคนที่จำได้เข้า SpaceGuardian gallery
+  3. Cross-validate กับ SpaceGuardian FR
 ```
 
 ---
@@ -291,44 +308,53 @@ tapo-bridge:
 
 ### หลักการ
 
-ไม่ว่า face จะถูกจดจำจากระบบไหน ข้อมูลจะรวมอยู่ใน registry เดียว:
+ข้อมูลใบหน้าทั้งหมดรวมอยู่ใน registry เดียว ไม่ว่าจะมาจาก source ไหน:
 
 ```text
-┌─────────────────────────────────────────────┐
-│          Unified Identity Registry           │
-│                                             │
-│  Person: "สมชาย"                             │
-│  ├── Embeddings จาก SpaceGuardian FR (5 รูป) │
-│  ├── Embeddings จาก Tapo camera (3 รูป)      │
-│  ├── Source: manual + tapo + auto            │
-│  └── Total confidence: high                  │
-│                                             │
-│  Person: "คนส่งพัสดุ"                         │
-│  ├── Embeddings จาก SpaceGuardian FR (2 รูป) │
-│  ├── Source: manual                          │
-│  └── Total confidence: medium                │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│            Unified Identity Registry              │
+│                                                  │
+│  Person: "สมชาย"                                  │
+│  ├── Embeddings จาก manual register (3 รูป)       │
+│  ├── Embeddings จาก Frigate auto-capture (8 รูป)  │
+│  ├── Embeddings จาก grouped events (5 รูป)        │
+│  ├── Source: manual + frigate + group             │
+│  └── Total confidence: high (16 samples)          │
+│                                                  │
+│  Person: "คนส่งพัสดุ"                              │
+│  ├── Embeddings จาก manual register (2 รูป)       │
+│  ├── Source: manual                              │
+│  └── Total confidence: medium (2 samples)         │
+│                                                  │
+│  [อนาคต] Person: "แม่บ้าน"                        │
+│  ├── Embeddings จาก Tapo FR Bridge (เมื่อ API เปิด)│
+│  └── Source: tapo                                │
+└──────────────────────────────────────────────────┘
 ```
 
-### Sync Strategy: Tapo ↔ SpaceGuardian
+### Identity Enrichment Flow
 
 ```text
-กรณี A: ลงทะเบียนใน SpaceGuardian ก่อน
-  1. User register "สมชาย" ผ่าน web UI
-  2. face-service เก็บ embeddings
-  3. Tapo Bridge sync ชื่อ + รูปไปยัง Tapo camera (ถ้ารองรับ)
-     └── pytapo.setFaceName(face_id, "สมชาย")
+กรณี A: ลงทะเบียนด้วยมือ
+  1. User upload รูปหน้า "สมชาย" ผ่าน web UI
+  2. face-service extract embeddings → เก็บใน gallery
+  3. เมื่อ Frigate detect person → face-service จำได้ → auto-annotate
 
-กรณี B: Tapo จำได้ก่อน
-  1. Tapo detect + recognize "Person A"
-  2. Tapo Bridge poll แล้วเห็น face event
-  3. ดึงรูป face จาก Tapo → register ใน face-service
-  4. SpaceGuardian มี embedding ของ "Person A" แล้ว
+กรณี B: ใช้ Grouped Events ที่มีอยู่
+  1. User group events ว่า "นี่คือสมชาย" (ระบบที่มีอยู่แล้ว)
+  2. กด "Register Face" → crop faces จาก thumbnails
+  3. face-service เก็บ embeddings ของ "สมชาย"
+  4. events ถัดไป → auto-identify
 
-กรณี C: ทั้งสองจำได้ → merge
-  1. SpaceGuardian FR จำได้ว่าเป็น "สมชาย" (similarity 0.82)
-  2. Tapo ก็จำได้ว่าเป็น face_id=1 "สมชาย"
-  3. ทั้งสองยืนยันซึ่งกันและกัน → confidence สูงขึ้น
+กรณี C: Auto-learning
+  1. face-service จำได้ → suggest "อาจเป็นสมชาย"
+  2. User กด confirm → เพิ่ม embedding ใหม่เข้า gallery
+  3. ระบบแม่นยำขึ้นเรื่อยๆ (more samples = better)
+
+กรณี D: อนาคต — Tapo FR sync
+  1. เมื่อ Tapo เปิด API → Tapo Bridge ดึง face identity
+  2. Sync เข้า Unified Registry
+  3. Cross-validate กับ embeddings ที่มีอยู่
 ```
 
 ---
@@ -352,20 +378,23 @@ tapo-bridge:
 ระยะเวลาโดยประมาณ: 1-2 สัปดาห์
 ```
 
-### Phase 3B: Tapo FR Bridge (เสริม)
+### Phase 3B: ONVIF Trigger + Smart Processing (เสริม)
 
 ```
 สิ่งที่ทำ:
-  ✦ สร้าง tapo-bridge service
-  ✦ Poll face events จาก Tapo ผ่าน pytapo
-  ✦ Sync Tapo faces ↔ SpaceGuardian gallery
-  ✦ Fallback: ถ้า Tapo จำไม่ได้ → ส่งให้ SpaceGuardian FR ลอง
+  ✦ สร้าง onvif-trigger service (optional)
+  ✦ Subscribe ONVIF IsPeople event จาก Tapo
+  ✦ เมื่อ Tapo detect person → trigger face-service ทำ FR
+  ✦ ลด CPU load (ไม่ต้อง process ทุก frame)
 
 ผลลัพธ์:
-  → ใช้ AI ของ Tapo เสริมการจดจำ
-  → ลด load บน server (Tapo ทำ inference บนกล้อง)
+  → ใช้ person detection ของ Tapo เป็น trigger (ฟรี ไม่เสีย server resource)
+  → face-service รันเฉพาะเมื่อมีคนจริงๆ
+  → รองรับกล้อง ONVIF ยี่ห้ออื่นด้วย
 
-ระยะเวลาโดยประมาณ: 1 สัปดาห์ (หลัง 3A เสร็จ)
+หมายเหตุ:
+  → Frigate ทำ person detection ได้อยู่แล้ว service นี้จึง optional
+  → มีประโยชน์เมื่อต้องการลด CPU load บน server
 ```
 
 ### Phase 3C: Unified Identity + Auto-learning
@@ -397,12 +426,11 @@ squareguardian/
 │   │   ├── embedding_store.py         # SQLite operations
 │   │   └── models/                    # downloaded ONNX models (gitignored)
 │   │
-│   └── tapo-bridge/                   # Tapo FR Bridge service
+│   └── onvif-trigger/                 # ONVIF person detection trigger (optional)
 │       ├── Dockerfile
-│       ├── requirements.txt           # pytapo, requests
-│       ├── main.py                    # polling loop
-│       ├── tapo_client.py             # pytapo wrapper
-│       └── sync.py                    # gallery sync logic
+│       ├── requirements.txt           # onvif-zeep, requests
+│       ├── main.py                    # ONVIF event subscription loop
+│       └── trigger.py                 # trigger face-service on person event
 │
 ├── storage/
 │   └── face-db/                       # SQLite + face data
@@ -417,22 +445,24 @@ squareguardian/
 
 ## ข้อเปรียบเทียบ
 
-| ด้าน | SpaceGuardian FR | Tapo FR |
-|------|-----------------|---------|
-| **กล้องที่รองรับ** | ทุกกล้อง RTSP | เฉพาะ Tapo รุ่นที่มี AI |
-| **จำนวนคนที่จำได้** | ไม่จำกัด (ตาม storage) | 50 คน (ข้อจำกัดของ Tapo) |
+| ด้าน | SpaceGuardian FR (ของเรา) | Tapo FR (ในตัวกล้อง) |
+|------|--------------------------|---------------------|
+| **กล้องที่รองรับ** | ทุกกล้อง RTSP | เฉพาะ C260, C560WS, + H500 hub |
+| **จำนวนคนที่จำได้** | ไม่จำกัด (ตาม storage) | ~50 คน |
+| **ดึงผลผ่าน API ได้** | ✅ เต็มที่ | ❌ ไม่เปิด API |
 | **ความแม่นยำ** | สูง (ArcFace pretrained) | ดี (แต่ไม่เปิดเผย model) |
 | **Resource ที่ใช้** | CPU/GPU บน server | ไม่ใช้ server (ทำบนกล้อง) |
 | **Latency** | ~100ms (CPU) / ~20ms (GPU) | realtime (บนกล้อง) |
-| **ความยืดหยุ่น** | เต็มที่ (เลือก model, threshold) | จำกัด (ตาม firmware) |
+| **ความยืดหยุ่น** | เต็มที่ (เลือก model, threshold) | จำกัด (ดูผลผ่าน Tapo App เท่านั้น) |
 | **Offline** | ✅ ทำงาน local ทั้งหมด | ✅ ทำงาน local ทั้งหมด |
 
-### เมื่อใช้ร่วมกัน
+### กลยุทธ์ที่ใช้ได้จริงตอนนี้
 
-- **Tapo ทำ first-pass** → detect + recognize บนกล้อง (ไม่เสีย server resource)
-- **SpaceGuardian FR ทำ second-pass** → verify หรือ identify คนที่ Tapo จำไม่ได้
-- **Cross-validation** → ทั้งสองยืนยันซึ่งกันและกัน → confidence สูงขึ้น
-- **Fallback** → ถ้ากล้องไม่ใช่ Tapo หรือ Tapo ไม่มี AI → SpaceGuardian FR ทำเองทั้งหมด
+- **SpaceGuardian FR เป็นหลัก** → ทำ face recognition ทั้งหมดบน server ของเรา
+- **Tapo ช่วยเป็น trigger** → ONVIF IsPeople event ลด unnecessary processing
+- **Frigate เป็น backbone** → person detection + snapshot + event management
+- **ไม่ต้องพึ่ง Tapo FR** → ระบบทำงานได้ครบโดยไม่ต้องอาศัย Tapo AI เลย
+- **เตรียม interface ไว้** → เมื่อ Tapo เปิด API ในอนาคต สามารถ plug-in ได้ทันที
 
 ---
 
@@ -453,10 +483,12 @@ squareguardian/
 
 ### ข้อจำกัดของ Tapo Integration
 
-- pytapo เป็น reverse-engineered library → อาจเปลี่ยนเมื่อ firmware update
-- ไม่ได้ใช้ official API (Tapo ไม่เปิด public API)
-- บางรุ่นอาจไม่รองรับ face recognition API
-- ควรออกแบบให้ Tapo Bridge เป็น **optional** ไม่ใช่ dependency
+- Tapo **ไม่เปิด API** สำหรับ facial recognition results (walled garden)
+- pytapo ทำได้แค่ตั้งค่า detection config ไม่สามารถดึง face identity
+- ONVIF ส่งแค่ boolean person detection ไม่มี face identity data
+- ONVIF person events มี bug: ต้องเปิด Motion Detection ใน Tapo App ด้วย
+- ดังนั้น Tapo ใช้เป็น **trigger** ได้ แต่ไม่ใช่ **source** ของ face recognition
+- ติดตาม [HomeAssistant-Tapo-Control #1043](https://github.com/JurajNyiri/HomeAssistant-Tapo-Control/issues/1043) สำหรับ updates
 
 ---
 
@@ -465,8 +497,8 @@ squareguardian/
 | สิ่งที่ได้ | รายละเอียด |
 |-----------|-----------|
 | **ระบบของเรา** | Face recognition ที่ใช้กับทุกกล้อง ควบคุมได้เต็มที่ |
-| **ดึง Tapo AI** | ใช้ AI ที่ Tapo มีในตัว ลด server load |
+| **ใช้ Tapo เป็น trigger** | ONVIF person detection ลด unnecessary processing |
 | **Unified Registry** | ข้อมูลจากทุก source รวมที่เดียว |
 | **Progressive** | เริ่มจาก face-service ก่อน → เพิ่ม Tapo bridge ทีหลัง |
 | **Privacy-first** | ข้อมูลอยู่ local ทั้งหมด |
-| **Extensible** | เพิ่มกล้องยี่ห้ออื่นได้ในอนาคต (Hikvision, Dahua bridge) |
+| **Extensible** | เพิ่มกล้องยี่ห้ออื่นได้ + plug-in Tapo FR เมื่อ API เปิดในอนาคต |
