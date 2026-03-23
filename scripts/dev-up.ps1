@@ -77,7 +77,7 @@ try {
     Write-Host '└──────────────────────────────────────────────────────────┘' -ForegroundColor Cyan
     Write-Host ''
     Write-Host 'Use port 8971 for the Frigate web UI to avoid broken Explore thumbnails.' -ForegroundColor Yellow
-    Write-Host "Face Service requires profile `"identity`": docker compose --profile identity up -d" -ForegroundColor Yellow
+    Write-Host 'Face Service requires profile "identity": docker compose --profile identity up -d' -ForegroundColor Yellow
     Write-Host ''
     Write-Host 'Useful follow-up:' -ForegroundColor Green
     Write-Host '  docker compose logs -f frigate'
