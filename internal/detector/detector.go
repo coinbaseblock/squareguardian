@@ -180,7 +180,42 @@ func (d *Detector) trackedLabels() []string {
 	return labels
 }
 
+// waitForFrigate blocks until Frigate's API responds or stop is signalled.
+func (d *Detector) waitForFrigate() bool {
+	url := fmt.Sprintf("%s/api/version", d.frigateURL)
+	backoff := 2 * time.Second
+	maxBackoff := 30 * time.Second
+
+	for {
+		resp, err := d.client.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				log.Println("detector: Frigate API is ready")
+				return true
+			}
+		}
+		log.Printf("detector: waiting for Frigate at %s (retry in %s)", d.frigateURL, backoff)
+
+		select {
+		case <-time.After(backoff):
+			if backoff < maxBackoff {
+				backoff = backoff * 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+			}
+		case <-d.stopCh:
+			return false
+		}
+	}
+}
+
 func (d *Detector) pollLoop() {
+	if !d.waitForFrigate() {
+		return
+	}
+
 	ticker := time.NewTicker(d.pollInterval)
 	defer ticker.Stop()
 
