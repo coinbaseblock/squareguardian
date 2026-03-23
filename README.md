@@ -114,12 +114,13 @@ docker compose logs -f frigate
 
 ถ้ารัน `docker compose up -d --build` แล้วเห็น warning ว่า `CAMERA_FRONT_RTSP_URL` ยังไม่ถูกตั้งค่า ให้ตรวจสอบว่าใน `.env` มี `CAMERA_FRONT_RTSP_URL=rtsp://...` ถูกต้องแล้ว
 
-ถ้าภาพสดไม่ขึ้นใน Frigate แม้ container จะขึ้นครบแล้ว ให้ตรวจสอบ 4 จุดนี้ก่อน:
+ถ้าภาพสดไม่ขึ้นใน Frigate แม้ container จะขึ้นครบแล้ว ให้ตรวจสอบ 5 จุดนี้ก่อน:
 
 1. เปิด UI ผ่าน `http://localhost:8971` ไม่ใช่ `http://localhost:5000`
 2. โปรเจกต์นี้จะส่ง RTSP เข้า Frigate ผ่าน env ชื่อ `FRIGATE_CAMERA_FRONT_RTSP_URL` ภายใน container อัตโนมัติ ดังนั้นใน `.env` ให้ตั้งเฉพาะ `CAMERA_FRONT_RTSP_URL=...` ตัวเดียวก็พอ
-3. เข้า `http://localhost:1984` แล้วดู stream `cam_front` ถ้า go2rtc เล่นไม่ได้ แปลว่า RTSP URL, user/password หรือ path ของกล้องยังไม่ถูกต้อง
-4. ถ้าอาการคือ “ภาพขึ้น 1–2 วินาทีแล้วจอดำ” มักเกิดจากกล้องส่ง H.265/HEVC ซึ่ง browser หลายตัวเล่นสดไม่เสถียร ตอนนี้โปรเจกต์จะแยก stream `cam_front_live` เพื่อแปลง live view เป็น H.264 ให้ UI โดยอัตโนมัติ แต่หลังแก้ config แล้วควร `docker compose up -d` หรือ restart `frigate` อีกครั้ง
+3. คอลัมน์โซนใน Dashboard จะอ้างอิงค่า `zones` ของกล้องจาก `config/frigate/config.yml` อัตโนมัติเมื่อ Frigate ยังไม่คืนค่า zone ดังนั้นถ้าเพิ่มกล้องใหม่ให้กำหนด zone ของกล้องนั้นในไฟล์ config เดียวกัน
+4. เข้า `http://localhost:1984` แล้วดู stream `cam_front` ถ้า go2rtc เล่นไม่ได้ แปลว่า RTSP URL, user/password หรือ path ของกล้องยังไม่ถูกต้อง
+5. ถ้าอาการคือ “ภาพขึ้น 1–2 วินาทีแล้วจอดำ” มักเกิดจากกล้องส่ง H.265/HEVC ซึ่ง browser หลายตัวเล่นสดไม่เสถียร ตอนนี้โปรเจกต์จะแยก stream `cam_front_live` เพื่อแปลง live view เป็น H.264 ให้ UI โดยอัตโนมัติ แต่หลังแก้ config แล้วควร `docker compose up -d` หรือ restart `frigate` อีกครั้ง
 
 ## ลบ/เก็บกวาดแบบไม่ต้อง manual
 

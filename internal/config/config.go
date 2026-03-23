@@ -21,6 +21,9 @@ type Config struct {
 	// Detection
 	TrackedItems []string
 
+	// Camera labeling derived from Frigate config
+	CameraZones map[string]string
+
 	// Storage
 	EventLogPath  string
 	MaxStorageGB  int // max disk usage in GB before cleanup (default 256)
@@ -38,6 +41,7 @@ func Load() *Config {
 			"person", "car", "motorcycle", "bus", "truck",
 			"backpack", "suitcase", "handbag",
 		}),
+		CameraZones:   loadCameraZones(),
 		EventLogPath:  getEnv("EVENT_LOG_PATH", "/data/events"),
 		MaxStorageGB:  getInt("MAX_STORAGE_GB", 256),
 		BufferGB:      getInt("BUFFER_GB", 10),

@@ -32,7 +32,7 @@ func main() {
 	det.Start()
 	defer det.Stop()
 
-	handler := api.New(det)
+	handler := api.New(det, cfg.CameraZones)
 	srv := &http.Server{
 		Addr:         cfg.ListenAddr,
 		Handler:      handler,
