@@ -4,7 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
-Write-Host '== SpaceGuardian quick start (no build) ==' -ForegroundColor Green
+Write-Host '== SquareGuardian quick start (no build) ==' -ForegroundColor Green
 Push-Location $repoRoot
 
 try {

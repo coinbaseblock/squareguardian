@@ -1,6 +1,6 @@
 services:
   frigate:
-    container_name: spaceguardian-frigate
+    container_name: squareguardian-frigate
     image: ghcr.io/blakeblackshear/frigate:stable
     restart: unless-stopped
     shm_size: "512mb"
@@ -47,7 +47,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
 
   squareguardian:
-    container_name: spaceguardian-detector
+    container_name: squareguardian-detector
     build:
       context: .
       target: runtime

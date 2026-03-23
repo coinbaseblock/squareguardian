@@ -20,7 +20,7 @@ function Invoke-DockerCommand {
     }
 }
 
-Write-Host '== SpaceGuardian cleanup ==' -ForegroundColor Yellow
+Write-Host '== SquareGuardian cleanup ==' -ForegroundColor Yellow
 Push-Location $repoRoot
 
 try {

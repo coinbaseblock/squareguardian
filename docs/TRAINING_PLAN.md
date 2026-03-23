@@ -110,7 +110,7 @@ for entry in data["training_data"]:
 ### 6. Deploy & Inference
 
 1. Export model เป็น ONNX หรือ TFLite
-2. เพิ่ม inference endpoint ใน SpaceGuardian
+2. เพิ่ม inference endpoint ใน SquareGuardian
 3. เมื่อ event ใหม่เข้ามา:
    - Extract embedding vector จากรูป
    - Compare กับ embedding ของกลุ่มที่รู้จัก

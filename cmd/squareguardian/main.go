@@ -16,7 +16,7 @@ import (
 
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
-	log.Println("SpaceGuardian starting...")
+	log.Println("SquareGuardian starting...")
 
 	cfg := config.Load()
 
@@ -58,5 +58,5 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("shutdown error: %v", err)
 	}
-	log.Println("SpaceGuardian stopped")
+	log.Println("SquareGuardian stopped")
 }
