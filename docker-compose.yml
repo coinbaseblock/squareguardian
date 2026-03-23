@@ -63,15 +63,15 @@ services:
       MAX_STORAGE_GB: ${MAX_STORAGE_GB:-256}
       BUFFER_GB: ${BUFFER_GB:-10}
       SAVE_INTERVAL_SEC: ${SAVE_INTERVAL_SEC:-30}
-      FACE_SERVICE_URL: http://face-service:8082
+      FACE_SERVICE_URL: ${FACE_SERVICE_URL:-}
     volumes:
       - ./storage/events:/data/events
       - ./config/frigate:/config:ro
     depends_on:
       - frigate
-      - face-service
 
   face-service:
+    profiles: ["identity"]
     container_name: squareguardian-face
     build:
       context: ./services/face

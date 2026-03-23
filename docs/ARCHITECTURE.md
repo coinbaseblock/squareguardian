@@ -69,6 +69,7 @@ TP-Link Tapo RTSP Camera
 
 - รู้ว่าเป็นใคร
 - เชื่อม attendance ได้
+- ใน local pilot ควรเปิดเป็น optional service/profile แยกจาก detection stack หลัก
 
 ### Vehicle / LPR Layer
 

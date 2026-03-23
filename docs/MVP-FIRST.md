@@ -73,6 +73,7 @@
 - เริ่มจาก detection ก่อน
 - ใช้ zone/rule ที่เข้าใจง่ายก่อน
 - อย่าเพิ่ม dependency หนักถ้ายังไม่จำเป็น
+- service เสริมอย่าง face recognition ควรเป็น optional profile เพื่อไม่ให้ block การสตาร์ต MVP detection
 - เก็บ credential ผ่าน `.env` เท่านั้น
 - ใช้ `CAMERA_FRONT_RTSP_URL` เป็นชื่อตัวแปรเดียวสำหรับ RTSP URL (รองรับกล้องทุกยี่ห้อ)
 - documentation ต้องพาคนเริ่มได้จริง
