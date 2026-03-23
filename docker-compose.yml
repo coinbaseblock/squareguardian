@@ -67,5 +67,4 @@ services:
       - ./storage/events:/data/events
       - ./config/frigate:/config:ro
     depends_on:
-      frigate:
-        condition: service_healthy
+      - frigate

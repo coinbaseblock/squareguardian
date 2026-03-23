@@ -1,3 +1,6 @@
+# Fallback config — overwritten on container start by generate-frigate-config.sh.
+# This file exists so Frigate can boot even if the entrypoint script is skipped.
+
 mqtt:
   enabled: false
 
@@ -13,59 +16,8 @@ birdseye:
 record:
   enabled: false
 
-snapshots:
-  enabled: true
-  retain:
-    default: 7
-
-objects:
-  track:
-    - person
-    - car
-    - motorcycle
-    - bus
-    # item detection
-    - backpack
-    - suitcase
-    - handbag
-
 detectors:
   cpu1:
     type: cpu
 
-go2rtc:
-  streams:
-    cam_front:
-      - "{FRIGATE_CAMERA_FRONT_RTSP_URL}"
-    cam_front_live:
-      # Some cameras expose H.265/HEVC by default. Browsers often show the
-      # first frame and then go black, so transcode the UI live stream to H.264.
-      - "ffmpeg:cam_front#video=h264"
-
-cameras:
-  cam_front:
-    enabled: true
-    live:
-      streams:
-        main: cam_front_live
-    detect:
-      enabled: true
-      width: 1280
-      height: 720
-      fps: 5
-    ffmpeg:
-      inputs:
-        - path: rtsp://127.0.0.1:8554/cam_front
-          input_args: preset-rtsp-restream
-          roles:
-            - detect
-    motion:
-      mask:
-        - 0,0,1,0,1,0.06,0,0.06
-    zones:
-      front_door:
-        coordinates: 0.05,0.95,0.38,0.95,0.38,0.40,0.05,0.40
-        inertia: 3
-        loitering_time: 0
-    snapshots:
-      enabled: true
+cameras: {}
