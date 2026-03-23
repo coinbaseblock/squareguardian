@@ -44,5 +44,6 @@ services:
       SAVE_INTERVAL_SEC: ${SAVE_INTERVAL_SEC:-30}
     volumes:
       - ./storage/events:/data/events
+      - ./config/frigate:/config:ro
     depends_on:
       - frigate

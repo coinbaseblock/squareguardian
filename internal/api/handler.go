@@ -17,13 +17,17 @@ import (
 
 // Handler serves the SpaceGuardian HTTP API.
 type Handler struct {
-	det *detector.Detector
-	mux *http.ServeMux
+	det         *detector.Detector
+	cameraZones map[string]string
+	mux         *http.ServeMux
 }
 
 // New creates a new API handler.
-func New(det *detector.Detector) *Handler {
-	h := &Handler{det: det, mux: http.NewServeMux()}
+func New(det *detector.Detector, cameraZones map[string]string) *Handler {
+	h := &Handler{det: det, cameraZones: make(map[string]string, len(cameraZones)), mux: http.NewServeMux()}
+	for camera, zone := range cameraZones {
+		h.cameraZones[strings.TrimSpace(camera)] = strings.TrimSpace(zone)
+	}
 	h.mux.HandleFunc("/", h.dashboard)
 	h.mux.HandleFunc("/events", h.eventsPage)
 	h.mux.HandleFunc("/healthz", h.healthz)
@@ -367,7 +371,7 @@ func (h *Handler) trainingData(w http.ResponseWriter, r *http.Request) {
 	type TrainingEntry struct {
 		GroupID   string           `json:"group_id"`
 		GroupName string           `json:"group_name"`
-		Label     string          `json:"label"`
+		Label     string           `json:"label"`
 		Events    []detector.Event `json:"events"`
 	}
 
@@ -417,7 +421,7 @@ func (h *Handler) buildEventRow(e detector.Event) string {
 	t := time.Unix(int64(e.StartTime), int64(math.Mod(e.StartTime, 1)*1e9))
 	ts := t.Format("2006-01-02 15:04:05")
 	score := fmt.Sprintf("%.0f%%", e.TopScore*100)
-	zone := e.Zone
+	zone := h.displayZone(e)
 	if zone == "" {
 		zone = "-"
 	}
@@ -502,6 +506,20 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		log.Printf("api: json encode error: %v", err)
 	}
+}
+
+func (h *Handler) displayZone(e detector.Event) string {
+	zone := strings.TrimSpace(e.Zone)
+	if zone != "" {
+		return zone
+	}
+	camera := strings.TrimSpace(e.Camera)
+	if h.cameraZones != nil {
+		if mappedZone := strings.TrimSpace(h.cameraZones[camera]); mappedZone != "" {
+			return mappedZone
+		}
+	}
+	return camera
 }
 
 func escapeJS(s string) string {
