@@ -15,7 +15,7 @@ import (
 	"squareguardian/internal/detector"
 )
 
-// Handler serves the SpaceGuardian HTTP API.
+// Handler serves the SquareGuardian HTTP API.
 type Handler struct {
 	det         *detector.Detector
 	cameraZones map[string]string
@@ -762,12 +762,12 @@ var dashboardTpl = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SpaceGuardian — Dashboard</title>
+<title>SquareGuardian — Dashboard</title>
 <meta http-equiv="refresh" content="10">
 <style>` + sharedStyles + `</style>
 </head>
 <body>
-<h1>SpaceGuardian Dashboard</h1>
+<h1>SquareGuardian Dashboard</h1>
 <div class="nav">
   <a href="/" class="active">Dashboard</a>
   <a href="/events">Events (แยกประเภท)</a>
@@ -821,7 +821,7 @@ var eventsPageTpl = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SpaceGuardian — Events</title>
+<title>SquareGuardian — Events</title>
 <meta http-equiv="refresh" content="30">
 <style>` + sharedStyles + `
 /* Events page grid */
@@ -883,7 +883,7 @@ body.select-mode .ident-badge{left:28px}
 </style>
 </head>
 <body>
-<h1>SpaceGuardian — Events แยกประเภท</h1>
+<h1>SquareGuardian — Events แยกประเภท</h1>
 <div class="nav">
   <a href="/">Dashboard</a>
   <a href="/events" class="active">Events (แยกประเภท)</a>

@@ -21,7 +21,7 @@ function Invoke-DockerCommand {
     }
 }
 
-Write-Host '== SpaceGuardian local start ==' -ForegroundColor Green
+Write-Host '== SquareGuardian local start ==' -ForegroundColor Green
 Push-Location $repoRoot
 
 try {

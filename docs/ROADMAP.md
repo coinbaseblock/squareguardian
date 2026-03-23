@@ -2,13 +2,13 @@
 
 ## เป้าหมาย
 
-roadmap นี้จัดลำดับให้ `SpaceGuardian` โตจาก single-camera local pilot ไปเป็นระบบ video intelligence ที่มี detection, identity, attendance, vehicle, lpr และ access-control โดยไม่เริ่มยากเกินไป.
+roadmap นี้จัดลำดับให้ `SquareGuardian` โตจาก single-camera local pilot ไปเป็นระบบ video intelligence ที่มี detection, identity, attendance, vehicle, lpr และ access-control โดยไม่เริ่มยากเกินไป.
 
 ## Phase 0 — Repo + Tapo Starter
 
 สิ่งที่ควรมี:
 
-- เปลี่ยน branding เป็น `SpaceGuardian`
+- เปลี่ยน branding เป็น `SquareGuardian`
 - Docker Compose สำหรับ local pilot
 - Frigate config สำหรับกล้อง RTSP 1 ตัว
 - `.env.example` สำหรับเก็บค่า RTSP นอก repo

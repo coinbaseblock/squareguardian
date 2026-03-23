@@ -2,7 +2,7 @@
 
 ## จุดประสงค์
 
-เอกสารนี้กำหนด schema ขั้นต้นของ `SpaceGuardian` โดยตั้งใจให้เริ่มจากไฟล์ JSON/YAML ก่อน เพื่อให้ local pilot ทำงานง่ายและยังขยายเป็น service จริงในอนาคตได้.
+เอกสารนี้กำหนด schema ขั้นต้นของ `SquareGuardian` โดยตั้งใจให้เริ่มจากไฟล์ JSON/YAML ก่อน เพื่อให้ local pilot ทำงานง่ายและยังขยายเป็น service จริงในอนาคตได้.
 
 ## 1. Person Registry
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# SpaceGuardian — Multi-stage Docker Build
+# SquareGuardian — Multi-stage Docker Build
 # Item detection event processor for Frigate-based camera systems.
 #
 # Usage:

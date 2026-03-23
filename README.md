@@ -1,6 +1,6 @@
-# SpaceGuardian
+# SquareGuardian
 
-SpaceGuardian คือชุดเริ่มต้นสำหรับทำระบบกล้อง AI แบบ **เปิดง่าย ใช้งานง่ายก่อน** โดยโฟกัสที่ local pilot 1 กล้องผ่าน RTSP เหมาะกับบ้าน หน้าร้าน ออฟฟิศ หรือประตูเข้าออกเล็ก ๆ.
+SquareGuardian คือชุดเริ่มต้นสำหรับทำระบบกล้อง AI แบบ **เปิดง่าย ใช้งานง่ายก่อน** โดยโฟกัสที่ local pilot 1 กล้องผ่าน RTSP เหมาะกับบ้าน หน้าร้าน ออฟฟิศ หรือประตูเข้าออกเล็ก ๆ.
 
 ใช้ได้กับกล้อง RTSP **ทุกยี่ห้อ** (Tapo, Hikvision, Dahua, Reolink ฯลฯ) ผ่าน Frigate + Docker Compose โดยไม่ commit credential กล้องลง repo.
 
@@ -19,7 +19,7 @@ SpaceGuardian คือชุดเริ่มต้นสำหรับทำ
 ## โครงสร้างที่เพิ่มเข้ามา
 
 ```text
-spaceguardian/
+squareguardian/
   docker-compose.yml
   .env.example
   config/
@@ -196,9 +196,9 @@ docker compose up -d --build
 2. `detect.width` / `detect.height` ให้ตรงกับ stream ที่ใช้
 3. `motion.mask` เพื่อตัด timestamp หรือพื้นที่ที่ขยับตลอดเวลาออก
 
-## แนวทาง MVP ของ SpaceGuardian
+## แนวทาง MVP ของ SquareGuardian
 
-SpaceGuardian ควรโตตามลำดับนี้:
+SquareGuardian ควรโตตามลำดับนี้:
 
 1. RTSP + person/vehicle detection
 2. zone / rule / alert แบบง่าย
