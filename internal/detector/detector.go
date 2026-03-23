@@ -31,11 +31,14 @@ type Detector struct {
 	saveInterval time.Duration
 	dirty        bool
 
+	// Face identification
+	faceClient *FaceClient
+
 	stopCh chan struct{}
 }
 
 // New creates a new Detector instance with disk-backed storage.
-func New(frigateURL string, trackedItems []string, pollInterval time.Duration, dataDir string, maxStorageGB, bufferGB, saveIntervalS int) *Detector {
+func New(frigateURL string, trackedItems []string, pollInterval time.Duration, dataDir string, maxStorageGB, bufferGB, saveIntervalS int, faceServiceURL string) *Detector {
 	items := make(map[string]bool, len(trackedItems))
 	for _, item := range trackedItems {
 		items[strings.TrimSpace(item)] = true
@@ -53,6 +56,7 @@ func New(frigateURL string, trackedItems []string, pollInterval time.Duration, d
 		dataDir:      dataDir,
 		maxBytes:     maxBytes,
 		saveInterval: time.Duration(saveIntervalS) * time.Second,
+		faceClient:   NewFaceClient(faceServiceURL),
 		stopCh:       make(chan struct{}),
 	}
 }
@@ -276,9 +280,9 @@ func (d *Detector) poll() {
 	}
 
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	added := 0
+	var newEvents []Event
 	for i := range raw {
 		if !d.trackedItems[raw[i].Label] {
 			continue
@@ -289,12 +293,33 @@ func (d *Detector) poll() {
 		ev := raw[i].ToEvent()
 		d.events = append([]Event{ev}, d.events...)
 		d.idSet[ev.ID] = true
+		newEvents = append(newEvents, ev)
 		added++
 	}
 
 	if added > 0 {
 		d.dirty = true
 		log.Printf("detector: fetched %d new events (%d total cached)", added, len(d.events))
+	}
+	d.mu.Unlock()
+
+	// Face identification runs outside the lock to avoid blocking polls
+	for i := range newEvents {
+		if newEvents[i].Label == "person" {
+			d.identifyNewEvent(&newEvents[i])
+			if newEvents[i].Identity != "" || newEvents[i].Note != "" {
+				d.mu.Lock()
+				for j := range d.events {
+					if d.events[j].ID == newEvents[i].ID {
+						d.events[j].Identity = newEvents[i].Identity
+						d.events[j].Note = newEvents[i].Note
+						d.dirty = true
+						break
+					}
+				}
+				d.mu.Unlock()
+			}
+		}
 	}
 }
 

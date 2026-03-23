@@ -31,6 +31,14 @@ go.work.sum
 # env file
 .env
 
+# Storage data
+storage/events/
+storage/frigate/
+storage/face-db/
+
+# Face service models (downloaded at build time)
+services/face/models/
+
 # Editor/IDE
 # .idea/
 # .vscode/

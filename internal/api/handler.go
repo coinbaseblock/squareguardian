@@ -17,19 +17,26 @@ import (
 
 // Handler serves the SquareGuardian HTTP API.
 type Handler struct {
-	det         *detector.Detector
-	cameraZones map[string]string
-	mux         *http.ServeMux
+	det            *detector.Detector
+	cameraZones    map[string]string
+	faceServiceURL string
+	mux            *http.ServeMux
 }
 
 // New creates a new API handler.
-func New(det *detector.Detector, cameraZones map[string]string) *Handler {
-	h := &Handler{det: det, cameraZones: make(map[string]string, len(cameraZones)), mux: http.NewServeMux()}
+func New(det *detector.Detector, cameraZones map[string]string, faceServiceURL string) *Handler {
+	h := &Handler{
+		det:            det,
+		cameraZones:    make(map[string]string, len(cameraZones)),
+		faceServiceURL: faceServiceURL,
+		mux:            http.NewServeMux(),
+	}
 	for camera, zone := range cameraZones {
 		h.cameraZones[strings.TrimSpace(camera)] = strings.TrimSpace(zone)
 	}
 	h.mux.HandleFunc("/", h.dashboard)
 	h.mux.HandleFunc("/events", h.eventsPage)
+	h.mux.HandleFunc("/faces", h.facesPage)
 	h.mux.HandleFunc("/healthz", h.healthz)
 	h.mux.HandleFunc("/api/events", h.events)
 	h.mux.HandleFunc("/api/status", h.status)
@@ -41,6 +48,7 @@ func New(det *detector.Detector, cameraZones map[string]string) *Handler {
 	h.mux.HandleFunc("/api/groups/delete", h.deleteGroup)
 	h.mux.HandleFunc("/api/training-data", h.trainingData)
 	h.mux.HandleFunc("/api/cameras", h.cameras)
+	h.mux.HandleFunc("/api/face/", h.faceProxy)
 	return h
 }
 
@@ -771,6 +779,7 @@ var dashboardTpl = `<!DOCTYPE html>
 <div class="nav">
   <a href="/" class="active">Dashboard</a>
   <a href="/events">Events (แยกประเภท)</a>
+  <a href="/faces">Face Gallery</a>
 </div>
 
 <div class="cards">
