@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     shm_size: "512mb"
     entrypoint: ["/bin/sh", "/config/scripts/generate-frigate-config.sh"]
-    command: ["python3", "-u", "-m", "frigate"]
+    command: ["/init"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:5000/api/version || exit 1"]
       interval: 10s
