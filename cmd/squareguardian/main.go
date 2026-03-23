@@ -28,11 +28,12 @@ func main() {
 		cfg.MaxStorageGB,
 		cfg.BufferGB,
 		cfg.SaveIntervalS,
+		cfg.FaceServiceURL,
 	)
 	det.Start()
 	defer det.Stop()
 
-	handler := api.New(det, cfg.CameraZones)
+	handler := api.New(det, cfg.CameraZones, cfg.FaceServiceURL)
 	srv := &http.Server{
 		Addr:         cfg.ListenAddr,
 		Handler:      handler,

@@ -63,8 +63,31 @@ services:
       MAX_STORAGE_GB: ${MAX_STORAGE_GB:-256}
       BUFFER_GB: ${BUFFER_GB:-10}
       SAVE_INTERVAL_SEC: ${SAVE_INTERVAL_SEC:-30}
+      FACE_SERVICE_URL: http://face-service:8082
     volumes:
       - ./storage/events:/data/events
       - ./config/frigate:/config:ro
     depends_on:
       - frigate
+      - face-service
+
+  face-service:
+    container_name: squareguardian-face
+    build:
+      context: ./services/face
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./storage/face-db:/data
+    environment:
+      MODEL_NAME: ${FACE_MODEL_NAME:-buffalo_s}
+      MATCH_THRESHOLD: ${FACE_MATCH_THRESHOLD:-0.45}
+      SUGGEST_THRESHOLD: ${FACE_SUGGEST_THRESHOLD:-0.35}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8082/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s

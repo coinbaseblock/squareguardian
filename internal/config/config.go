@@ -29,6 +29,9 @@ type Config struct {
 	MaxStorageGB  int // max disk usage in GB before cleanup (default 256)
 	BufferGB      int // keep this much free space when cleaning (default 10)
 	SaveIntervalS int // how often to save to disk in seconds (default 30)
+
+	// Face service
+	FaceServiceURL string
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -45,7 +48,8 @@ func Load() *Config {
 		EventLogPath:  getEnv("EVENT_LOG_PATH", "/data/events"),
 		MaxStorageGB:  getInt("MAX_STORAGE_GB", 256),
 		BufferGB:      getInt("BUFFER_GB", 10),
-		SaveIntervalS: getInt("SAVE_INTERVAL_SEC", 30),
+		SaveIntervalS:  getInt("SAVE_INTERVAL_SEC", 30),
+		FaceServiceURL: getEnv("FACE_SERVICE_URL", ""),
 	}
 }
 
