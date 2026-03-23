@@ -79,12 +79,17 @@ func (d *Detector) Stop() {
 	}
 }
 
-// Events returns all cached events, optionally filtered by label.
+// Events returns all cached events, optionally filtered by label and/or camera.
 func (d *Detector) Events(labelFilter string) []Event {
+	return d.EventsFiltered(labelFilter, "")
+}
+
+// EventsFiltered returns cached events filtered by label and/or camera.
+func (d *Detector) EventsFiltered(labelFilter, cameraFilter string) []Event {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	if labelFilter == "" {
+	if labelFilter == "" && cameraFilter == "" {
 		result := make([]Event, len(d.events))
 		copy(result, d.events)
 		return result
@@ -92,11 +97,31 @@ func (d *Detector) Events(labelFilter string) []Event {
 
 	var filtered []Event
 	for _, e := range d.events {
-		if e.Label == labelFilter {
-			filtered = append(filtered, e)
+		if labelFilter != "" && e.Label != labelFilter {
+			continue
 		}
+		if cameraFilter != "" && e.Camera != cameraFilter {
+			continue
+		}
+		filtered = append(filtered, e)
 	}
 	return filtered
+}
+
+// Cameras returns a deduplicated list of camera names from cached events.
+func (d *Detector) Cameras() []string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	seen := make(map[string]bool)
+	var cameras []string
+	for _, e := range d.events {
+		if e.Camera != "" && !seen[e.Camera] {
+			seen[e.Camera] = true
+			cameras = append(cameras, e.Camera)
+		}
+	}
+	return cameras
 }
 
 // Annotate updates an event's user-provided fields.
