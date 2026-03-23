@@ -4,6 +4,8 @@ services:
     image: ghcr.io/blakeblackshear/frigate:stable
     restart: unless-stopped
     shm_size: "512mb"
+    entrypoint: ["/bin/sh", "/config/scripts/generate-frigate-config.sh"]
+    command: ["python3", "-u", "-m", "frigate"]
     ports:
       - "8971:8971"
       # Keep Frigate UI on 8971. Expose the internal API on 5001 so it is
@@ -16,12 +18,25 @@ services:
       # Optional go2rtc debug UI / stream inspector.
       - "1984:1984"
     environment:
-      # Frigate only substitutes env vars in config when they use the
-      # FRIGATE_ prefix, so expose the camera URL with that name.
-      FRIGATE_CAMERA_FRONT_RTSP_URL: ${CAMERA_FRONT_RTSP_URL}
+      # Multi-camera support: add FRIGATE_CAMERA_<NAME>_RTSP_URL for each camera.
+      # The entrypoint script auto-generates Frigate config from these variables.
+      FRIGATE_CAMERA_FRONT_RTSP_URL: ${CAMERA_FRONT_RTSP_URL:-}
+      FRIGATE_CAMERA_BACK_RTSP_URL: ${CAMERA_BACK_RTSP_URL:-}
+      FRIGATE_CAMERA_PARKING_RTSP_URL: ${CAMERA_PARKING_RTSP_URL:-}
+      FRIGATE_CAMERA_GATE_RTSP_URL: ${CAMERA_GATE_RTSP_URL:-}
+      # Zone definitions (optional): zone_name:coords;zone2:coords2
+      FRIGATE_CAMERA_FRONT_ZONES: ${CAMERA_FRONT_ZONES:-front_door:0.05,0.95,0.38,0.95,0.38,0.40,0.05,0.40}
+      FRIGATE_CAMERA_BACK_ZONES: ${CAMERA_BACK_ZONES:-}
+      FRIGATE_CAMERA_PARKING_ZONES: ${CAMERA_PARKING_ZONES:-}
+      FRIGATE_CAMERA_GATE_ZONES: ${CAMERA_GATE_ZONES:-}
+      # Detection settings
+      FRIGATE_DETECT_WIDTH: ${FRIGATE_DETECT_WIDTH:-1280}
+      FRIGATE_DETECT_HEIGHT: ${FRIGATE_DETECT_HEIGHT:-720}
+      FRIGATE_DETECT_FPS: ${FRIGATE_DETECT_FPS:-5}
       TZ: ${FRIGATE_TIMEZONE:-Asia/Bangkok}
     volumes:
       - ./config/frigate:/config
+      - ./scripts/generate-frigate-config.sh:/config/scripts/generate-frigate-config.sh:ro
       - ./storage/frigate:/media/frigate
       - /etc/localtime:/etc/localtime:ro
 

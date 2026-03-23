@@ -40,6 +40,7 @@ func New(det *detector.Detector, cameraZones map[string]string) *Handler {
 	h.mux.HandleFunc("/api/groups", h.groups)
 	h.mux.HandleFunc("/api/groups/delete", h.deleteGroup)
 	h.mux.HandleFunc("/api/training-data", h.trainingData)
+	h.mux.HandleFunc("/api/cameras", h.cameras)
 	return h
 }
 
@@ -54,13 +55,22 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	events := h.det.Events("")
+	cameraFilter := r.URL.Query().Get("camera")
+	events := h.det.EventsFiltered("", cameraFilter)
 	labels := h.det.TrackedLabels()
+	cameras := h.det.Cameras()
 
 	// Count events by label
 	counts := make(map[string]int)
 	for _, e := range events {
 		counts[e.Label]++
+	}
+
+	// Build camera filter buttons
+	cameraButtons := fmt.Sprintf(`<a href="/" class="cam-btn%s">ทั้งหมด</a>`, boolClass(cameraFilter == "", " active"))
+	for _, cam := range cameras {
+		cameraButtons += fmt.Sprintf(`<a href="/?camera=%s" class="cam-btn%s">%s</a>`,
+			cam, boolClass(cameraFilter == cam, " active"), cam)
 	}
 
 	// Build label summary rows
@@ -90,7 +100,14 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, dashboardTpl, len(events), len(labels), labelRows, eventRows)
+	fmt.Fprintf(w, dashboardTpl, len(events), len(labels), cameraButtons, labelRows, eventRows)
+}
+
+func boolClass(cond bool, class string) string {
+	if cond {
+		return class
+	}
+	return ""
 }
 
 func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
@@ -233,10 +250,18 @@ func (h *Handler) healthz(w http.ResponseWriter, _ *http.Request) {
 
 func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 	label := r.URL.Query().Get("label")
-	events := h.det.Events(label)
+	camera := r.URL.Query().Get("camera")
+	events := h.det.EventsFiltered(label, camera)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"count":  len(events),
 		"events": events,
+	})
+}
+
+func (h *Handler) cameras(w http.ResponseWriter, _ *http.Request) {
+	cameras := h.det.Cameras()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"cameras": cameras,
 	})
 }
 
@@ -726,6 +751,10 @@ a{color:#4fc3f7;text-decoration:none}
 .nav{display:flex;gap:1em;margin-bottom:1.5em}
 .nav a{background:#252836;padding:.5em 1.2em;border-radius:6px;color:#4fc3f7;font-size:.9em}
 .nav a.active{background:#1976d2;color:#fff}
+.cam-filter{display:flex;gap:.5em;flex-wrap:wrap;margin-bottom:1em}
+.cam-btn{background:#252836;padding:.3em .8em;border-radius:6px;color:#999;font-size:.8em;text-decoration:none}
+.cam-btn.active{background:#1976d2;color:#fff}
+.cam-btn:hover{background:#333}
 `
 
 var dashboardTpl = `<!DOCTYPE html>
@@ -748,6 +777,11 @@ var dashboardTpl = `<!DOCTYPE html>
   <div class="card"><div class="num">%d</div><div class="lbl">Events ทั้งหมด</div></div>
   <div class="card"><div class="num">%d</div><div class="lbl">ประเภทที่ติดตาม</div></div>
   <div class="card"><div class="num"><span class="status ok">ONLINE</span></div><div class="lbl">สถานะระบบ</div></div>
+</div>
+
+<div class="section">
+<h2>กรองตามกล้อง</h2>
+<div class="cam-filter">%s</div>
 </div>
 
 <div class="section">
