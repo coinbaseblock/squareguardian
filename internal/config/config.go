@@ -39,6 +39,9 @@ type Config struct {
 
 	// Alert cooldown: avoid re-alerting for the same person on the same camera
 	AlertCooldownSec int // seconds to suppress duplicate alerts (default 300 = 5 min)
+
+	// Timezone for display (default Asia/Bangkok)
+	Timezone string
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -60,6 +63,7 @@ func Load() *Config {
 		SnapshotBurstCount:     getInt("SNAPSHOT_BURST_COUNT", 3),
 		SnapshotBurstIntervalMS: getInt("SNAPSHOT_BURST_INTERVAL_MS", 500),
 		AlertCooldownSec:       getInt("ALERT_COOLDOWN_SEC", 300),
+		Timezone:               getEnv("FRIGATE_TIMEZONE", "Asia/Bangkok"),
 	}
 }
 

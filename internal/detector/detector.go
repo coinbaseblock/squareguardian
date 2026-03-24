@@ -389,7 +389,7 @@ func (d *Detector) poll() {
 				for j := range d.events {
 					if d.events[j].ID == raw[i].ID {
 						d.events[j].EndTime = *raw[i].EndTime
-						d.events[j].TopScore = raw[i].TopScore
+						d.events[j].TopScore = raw[i].BestScore()
 						if raw[i].HasSnapshot {
 							d.events[j].Snapshot = raw[i].ID
 						}

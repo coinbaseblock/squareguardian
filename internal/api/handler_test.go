@@ -7,7 +7,7 @@ import (
 )
 
 func TestDisplayZoneUsesEventZoneFirst(t *testing.T) {
-	h := New(nil, map[string]string{"cam_front": "front_door"}, "")
+	h := New(nil, map[string]string{"cam_front": "front_door"}, "", "Asia/Bangkok")
 	e := detector.Event{Camera: "cam_front", Zone: "loading_bay"}
 
 	if got := h.displayZone(e); got != "loading_bay" {
@@ -16,7 +16,7 @@ func TestDisplayZoneUsesEventZoneFirst(t *testing.T) {
 }
 
 func TestDisplayZoneFallsBackToCameraZoneMap(t *testing.T) {
-	h := New(nil, map[string]string{"cam_front": "front_door"}, "")
+	h := New(nil, map[string]string{"cam_front": "front_door"}, "", "Asia/Bangkok")
 	e := detector.Event{Camera: "cam_front"}
 
 	if got := h.displayZone(e); got != "front_door" {
@@ -25,7 +25,7 @@ func TestDisplayZoneFallsBackToCameraZoneMap(t *testing.T) {
 }
 
 func TestDisplayZoneFallsBackToCameraName(t *testing.T) {
-	h := New(nil, map[string]string{}, "")
+	h := New(nil, map[string]string{}, "", "Asia/Bangkok")
 	e := detector.Event{Camera: "cam_loading"}
 
 	if got := h.displayZone(e); got != "cam_loading" {

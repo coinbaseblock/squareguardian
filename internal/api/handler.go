@@ -20,15 +20,25 @@ type Handler struct {
 	det            *detector.Detector
 	cameraZones    map[string]string
 	faceServiceURL string
+	timezone       *time.Location
+	timezoneName   string
 	mux            *http.ServeMux
 }
 
 // New creates a new API handler.
-func New(det *detector.Detector, cameraZones map[string]string, faceServiceURL string) *Handler {
+func New(det *detector.Detector, cameraZones map[string]string, faceServiceURL string, timezone string) *Handler {
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		log.Printf("api: invalid timezone %q, falling back to Asia/Bangkok", timezone)
+		loc, _ = time.LoadLocation("Asia/Bangkok")
+		timezone = "Asia/Bangkok"
+	}
 	h := &Handler{
 		det:            det,
 		cameraZones:    make(map[string]string, len(cameraZones)),
 		faceServiceURL: faceServiceURL,
+		timezone:       loc,
+		timezoneName:   timezone,
 		mux:            http.NewServeMux(),
 	}
 	for camera, zone := range cameraZones {
@@ -59,12 +69,56 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mux.ServeHTTP(w, r)
 }
 
+// commonTimezones is the list of timezone options available in the UI.
+var commonTimezones = []string{
+	"Asia/Bangkok",
+	"Asia/Tokyo",
+	"Asia/Shanghai",
+	"Asia/Singapore",
+	"Asia/Kolkata",
+	"Asia/Dubai",
+	"Europe/London",
+	"Europe/Paris",
+	"Europe/Berlin",
+	"America/New_York",
+	"America/Chicago",
+	"America/Denver",
+	"America/Los_Angeles",
+	"Pacific/Auckland",
+	"Australia/Sydney",
+	"UTC",
+}
+
+// resolveTimezone returns the timezone location to use for this request.
+// Priority: ?tz= query param > server default.
+func (h *Handler) resolveTimezone(r *http.Request) *time.Location {
+	if tz := r.URL.Query().Get("tz"); tz != "" {
+		if loc, err := time.LoadLocation(tz); err == nil {
+			return loc
+		}
+	}
+	return h.timezone
+}
+
+func (h *Handler) buildTimezoneOptions(selected string) string {
+	opts := ""
+	for _, tz := range commonTimezones {
+		sel := ""
+		if tz == selected {
+			sel = " selected"
+		}
+		opts += fmt.Sprintf(`<option value="%s"%s>%s</option>`, tz, sel, tz)
+	}
+	return opts
+}
+
 func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
 
+	loc := h.resolveTimezone(r)
 	cameraFilter := r.URL.Query().Get("camera")
 	events := h.det.EventsFiltered("", cameraFilter)
 	labels := h.det.TrackedLabels()
@@ -77,7 +131,7 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build camera filter buttons
-	cameraButtons := fmt.Sprintf(`<a href="/" class="cam-btn%s">ทั้งหมด</a>`, boolClass(cameraFilter == "", " active"))
+	cameraButtons := fmt.Sprintf(`<a href="/" class="cam-btn%s" data-i18n="all_cameras">ทั้งหมด</a>`, boolClass(cameraFilter == "", " active"))
 	for _, cam := range cameras {
 		cameraButtons += fmt.Sprintf(`<a href="/?camera=%s" class="cam-btn%s">%s</a>`,
 			cam, boolClass(cameraFilter == cam, " active"), cam)
@@ -96,6 +150,11 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 			dot, l, c)
 	}
 
+	// Temporarily set handler timezone for row rendering
+	origLoc := h.timezone
+	h.timezone = loc
+	defer func() { h.timezone = origLoc }()
+
 	// Build recent events rows (last 20)
 	limit := 20
 	if len(events) < limit {
@@ -106,11 +165,13 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 		eventRows += h.buildEventRow(e)
 	}
 	if eventRows == "" {
-		eventRows = `<tr><td colspan="14" style="text-align:center;color:#888;padding:2em">ยังไม่มี event — รอ Frigate ตรวจจับ...</td></tr>`
+		eventRows = `<tr><td colspan="14" style="text-align:center;color:#888;padding:2em" data-i18n="no_events">ยังไม่มี event — รอ Frigate ตรวจจับ...</td></tr>`
 	}
 
+	tzOpts := h.buildTimezoneOptions(loc.String())
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, dashboardTpl, len(events), len(labels), cameraButtons, labelRows, eventRows)
+	fmt.Fprintf(w, dashboardTpl, tzOpts, len(events), len(labels), cameraButtons, labelRows, eventRows, h.timezoneName)
 }
 
 func boolClass(cond bool, class string) string {
@@ -121,6 +182,11 @@ func boolClass(cond bool, class string) string {
 }
 
 func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
+	loc := h.resolveTimezone(r)
+	origLoc := h.timezone
+	h.timezone = loc
+	defer func() { h.timezone = origLoc }()
+
 	events := h.det.Events("")
 	labels := h.det.TrackedLabels()
 	groups := h.det.Groups()
@@ -152,7 +218,7 @@ func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
 			showLimit = len(evts)
 		}
 		for _, e := range evts[:showLimit] {
-			t := time.Unix(int64(e.StartTime), int64(math.Mod(e.StartTime, 1)*1e9))
+			t := time.Unix(int64(e.StartTime), int64(math.Mod(e.StartTime, 1)*1e9)).In(h.timezone)
 			ts := t.Format("15:04")
 			ago := timeAgo(e.StartTime)
 
@@ -250,8 +316,9 @@ func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
 		groupsSummary += `</div>`
 	}
 
+	tzOpts := h.buildTimezoneOptions(loc.String())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, eventsPageTpl, sections, groupsSummary)
+	fmt.Fprintf(w, eventsPageTpl, tzOpts, sections, groupsSummary, h.timezoneName)
 }
 
 func (h *Handler) healthz(w http.ResponseWriter, _ *http.Request) {
@@ -468,7 +535,7 @@ func (h *Handler) proxyFrigate(w http.ResponseWriter, path string) {
 }
 
 func (h *Handler) buildEventRow(e detector.Event) string {
-	t := time.Unix(int64(e.StartTime), int64(math.Mod(e.StartTime, 1)*1e9))
+	t := time.Unix(int64(e.StartTime), int64(math.Mod(e.StartTime, 1)*1e9)).In(h.timezone)
 	ts := t.Format("2006-01-02 15:04:05")
 	score := fmt.Sprintf("%.0f%%", e.TopScore*100)
 	zone := h.displayZone(e)
@@ -607,6 +674,165 @@ func labelDisplayName(label string) string {
 	}
 	return label
 }
+
+// i18nScript provides client-side bilingual (Thai/English) translation and timezone selection.
+const i18nScript = `
+<script>
+var i18n = {
+  th: {
+    dashboard: "Dashboard",
+    events_by_type: "Events (แยกประเภท)",
+    face_gallery: "Face Gallery",
+    all_events: "Events ทั้งหมด",
+    tracked_types: "ประเภทที่ติดตาม",
+    system_status: "สถานะระบบ",
+    filter_by_camera: "กรองตามกล้อง",
+    all_cameras: "ทั้งหมด",
+    summary_by_type: "สรุปตามประเภท",
+    type_col: "ประเภท",
+    event_count: "จำนวน Event",
+    recent_events: "Events ล่าสุด (20 รายการ)",
+    image: "ภาพ",
+    time: "เวลา",
+    camera: "กล้อง",
+    detected: "ตรวจพบ",
+    confidence: "ความมั่นใจ",
+    zone: "โซน",
+    identity: "ระบุตัวตน",
+    room: "ห้อง",
+    license_plate: "ทะเบียน",
+    brand_color: "ยี่ห้อ/สี",
+    notes: "หมายเหตุ",
+    no_events: "ยังไม่มี event — รอ Frigate ตรวจจับ...",
+    auto_refresh: "Auto-refresh ทุก 10 วินาที",
+    select_multiple: "เลือกหลายรายการ",
+    click_to_identify: "คลิกที่รูปเพื่อระบุตัวตน, ห้อง, ทะเบียนรถ, ยี่ห้อ/สี",
+    selected_count: "เลือกแล้ว",
+    items: "รายการ",
+    create_group: "สร้างกลุ่ม",
+    cancel: "ยกเลิก",
+    new_group: "สร้างกลุ่มใหม่",
+    group_desc: "รวมภาพที่เลือกเป็นกลุ่มเดียวกัน (เช่น คนเดียวกัน, รถคันเดียวกัน)",
+    group_name: "ชื่อกลุ่ม",
+    type_label: "ประเภท",
+    selected_images: "ภาพที่เลือก",
+    existing_groups: "กลุ่มที่สร้างแล้ว",
+    delete_group: "ลบกลุ่ม",
+    save: "บันทึก",
+    additional_info: "ระบุข้อมูลเพิ่มเติม",
+    identity_name: "ระบุตัวตน (ชื่อคน)",
+    room_unit: "เลขห้อง / Unit",
+    license: "ทะเบียนรถ",
+    province: "จังหวัด (ถ้ามี)",
+    brand_model: "ยี่ห้อ / รุ่น",
+    vehicle_color: "สีรถ",
+    feedback: "หมายเหตุ / Feedback",
+    saved_success: "บันทึกสำเร็จ!",
+    group_created: "สร้างกลุ่มสำเร็จ!",
+    enter_group_name: "กรุณาใส่ชื่อกลุ่ม",
+    select_at_least_2: "กรุณาเลือกอย่างน้อย 2 รายการ",
+    confirm_delete: "ต้องการลบกลุ่มนี้?",
+    just_now: "เมื่อสักครู่",
+    more_items: "รายการ",
+    timezone: "เขตเวลา",
+    language: "ภาษา",
+    images: "ภาพ",
+    face_status_online: "พร้อมใช้งาน",
+    face_status_offline: "ไม่ได้เชื่อมต่อ",
+    outside_person: "คนภายนอก"
+  },
+  en: {
+    dashboard: "Dashboard",
+    events_by_type: "Events (by type)",
+    face_gallery: "Face Gallery",
+    all_events: "Total Events",
+    tracked_types: "Tracked Types",
+    system_status: "System Status",
+    filter_by_camera: "Filter by Camera",
+    all_cameras: "All",
+    summary_by_type: "Summary by Type",
+    type_col: "Type",
+    event_count: "Event Count",
+    recent_events: "Recent Events (20)",
+    image: "Image",
+    time: "Time",
+    camera: "Camera",
+    detected: "Detected",
+    confidence: "Confidence",
+    zone: "Zone",
+    identity: "Identity",
+    room: "Room",
+    license_plate: "License Plate",
+    brand_color: "Brand/Color",
+    notes: "Notes",
+    no_events: "No events yet — waiting for Frigate detection...",
+    auto_refresh: "Auto-refresh every 10 seconds",
+    select_multiple: "Select Multiple",
+    click_to_identify: "Click image to identify, add room, license plate, brand/color",
+    selected_count: "Selected",
+    items: "items",
+    create_group: "Create Group",
+    cancel: "Cancel",
+    new_group: "Create New Group",
+    group_desc: "Group selected images together (e.g. same person, same vehicle)",
+    group_name: "Group Name",
+    type_label: "Type",
+    selected_images: "Selected Images",
+    existing_groups: "Existing Groups",
+    delete_group: "Delete Group",
+    save: "Save",
+    additional_info: "Additional Information",
+    identity_name: "Identity (Name)",
+    room_unit: "Room / Unit",
+    license: "License Plate",
+    province: "Province",
+    brand_model: "Brand / Model",
+    vehicle_color: "Vehicle Color",
+    feedback: "Notes / Feedback",
+    saved_success: "Saved successfully!",
+    group_created: "Group created!",
+    enter_group_name: "Please enter group name",
+    select_at_least_2: "Please select at least 2 items",
+    confirm_delete: "Delete this group?",
+    just_now: "just now",
+    more_items: "items",
+    timezone: "Timezone",
+    language: "Language",
+    images: "images",
+    face_status_online: "Online",
+    face_status_offline: "Not connected",
+    outside_person: "Unknown person"
+  }
+};
+
+function getLang() {
+  return localStorage.getItem('sg_lang') || 'th';
+}
+
+function setLang(lang) {
+  localStorage.setItem('sg_lang', lang);
+  applyLang();
+}
+
+function applyLang() {
+  var lang = getLang();
+  var t = i18n[lang] || i18n.th;
+  document.querySelectorAll('[data-i18n]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n');
+    if (t[key]) el.textContent = t[key];
+  });
+  // Update lang toggle button
+  var btn = document.getElementById('langToggle');
+  if (btn) btn.textContent = lang === 'th' ? 'EN' : 'TH';
+}
+
+function toggleLang() {
+  setLang(getLang() === 'th' ? 'en' : 'th');
+}
+
+document.addEventListener('DOMContentLoaded', applyLang);
+</script>
+`
 
 func timeAgo(startTime float64) string {
 	d := time.Since(time.Unix(int64(startTime), 0))
@@ -789,41 +1015,54 @@ var dashboardTpl = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SquareGuardian — Dashboard</title>
 <meta http-equiv="refresh" content="10">
-<style>` + sharedStyles + `</style>
+<style>` + sharedStyles + `
+.top-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5em;margin-bottom:.5em}
+.top-controls{display:flex;gap:.5em;align-items:center}
+.lang-btn{background:#252836;border:1px solid #555;color:#4fc3f7;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:.8em;font-weight:bold}
+.lang-btn:hover{background:#333}
+.tz-select{background:#252836;border:1px solid #555;color:#4fc3f7;padding:4px 8px;border-radius:6px;font-size:.8em}
+</style>
 </head>
 <body>
-<h1>SquareGuardian Dashboard</h1>
+<div class="top-bar">
+  <h1>SquareGuardian Dashboard</h1>
+  <div class="top-controls">
+    <span style="color:#888;font-size:.8em" data-i18n="timezone">เขตเวลา</span>
+    <select class="tz-select" id="tzSelect" onchange="setTimezone(this.value)">%s</select>
+    <button class="lang-btn" id="langToggle" onclick="toggleLang()">EN</button>
+  </div>
+</div>
 <div class="nav">
-  <a href="/" class="active">Dashboard</a>
-  <a href="/events">Events (แยกประเภท)</a>
-  <a href="/faces">Face Gallery</a>
+  <a href="/" class="active" data-i18n="dashboard">Dashboard</a>
+  <a href="/events" data-i18n="events_by_type">Events (แยกประเภท)</a>
+  <a href="/faces" data-i18n="face_gallery">Face Gallery</a>
 </div>
 
 <div class="cards">
-  <div class="card"><div class="num">%d</div><div class="lbl">Events ทั้งหมด</div></div>
-  <div class="card"><div class="num">%d</div><div class="lbl">ประเภทที่ติดตาม</div></div>
-  <div class="card"><div class="num"><span class="status ok">ONLINE</span></div><div class="lbl">สถานะระบบ</div></div>
+  <div class="card"><div class="num">%d</div><div class="lbl" data-i18n="all_events">Events ทั้งหมด</div></div>
+  <div class="card"><div class="num">%d</div><div class="lbl" data-i18n="tracked_types">ประเภทที่ติดตาม</div></div>
+  <div class="card"><div class="num"><span class="status ok">ONLINE</span></div><div class="lbl" data-i18n="system_status">สถานะระบบ</div></div>
 </div>
 
 <div class="section">
-<h2>กรองตามกล้อง</h2>
+<h2 data-i18n="filter_by_camera">กรองตามกล้อง</h2>
 <div class="cam-filter">%s</div>
 </div>
 
 <div class="section">
-<h2>สรุปตามประเภท</h2>
+<h2 data-i18n="summary_by_type">สรุปตามประเภท</h2>
 <table>
-<tr><th>ประเภท</th><th style="text-align:right">จำนวน Event</th></tr>
+<tr><th data-i18n="type_col">ประเภท</th><th style="text-align:right" data-i18n="event_count">จำนวน Event</th></tr>
 %s
 </table>
 </div>
 
 <div class="section">
-<h2>Events ล่าสุด (20 รายการ)</h2>
+<h2 data-i18n="recent_events">Events ล่าสุด (20 รายการ)</h2>
 <table>
 <tr>
-  <th>ภาพ</th><th>เวลา</th><th>กล้อง</th><th>ตรวจพบ</th><th>Sub-Label</th><th>ความมั่นใจ</th>
-  <th>โซน</th><th>ระบุตัวตน</th><th>ห้อง</th><th>ทะเบียน</th><th>ยี่ห้อ/สี</th><th>หมายเหตุ</th><th></th>
+  <th data-i18n="image">ภาพ</th><th data-i18n="time">เวลา</th><th data-i18n="camera">กล้อง</th><th data-i18n="detected">ตรวจพบ</th><th>Sub-Label</th><th data-i18n="confidence">ความมั่นใจ</th>
+  <th data-i18n="zone">โซน</th><th data-i18n="identity">ระบุตัวตน</th><th data-i18n="room">ห้อง</th><th data-i18n="license_plate">ทะเบียน</th><th data-i18n="brand_color">ยี่ห้อ/สี</th><th data-i18n="notes">หมายเหตุ</th><th></th>
 </tr>
 %s
 </table>
@@ -836,9 +1075,25 @@ var dashboardTpl = `<!DOCTYPE html>
   <a href="/api/status">API: Status</a>
   <a href="/healthz">Health Check</a>
 </div>
-<p style="margin-top:1em;color:#666;font-size:.8em">Auto-refresh ทุก 10 วินาที | Storage: ไม่จำกัด (max 256 GB)</p>
+<p style="margin-top:1em;color:#666;font-size:.8em"><span data-i18n="auto_refresh">Auto-refresh ทุก 10 วินาที</span> | Storage: max 256 GB</p>
 
 ` + feedbackScript + `
+` + i18nScript + `
+<script>
+var defaultTZ = '%s';
+function getTimezone() { return localStorage.getItem('sg_tz') || defaultTZ; }
+function setTimezone(tz) {
+  localStorage.setItem('sg_tz', tz);
+  // Reload with tz parameter
+  var url = new URL(window.location);
+  url.searchParams.set('tz', tz);
+  window.location = url;
+}
+(function() {
+  var sel = document.getElementById('tzSelect');
+  if (sel) sel.value = getTimezone();
+})();
+</script>
 </body>
 </html>`
 
@@ -906,17 +1161,30 @@ body.select-mode .ident-badge{left:28px}
 .group-thumbs{display:flex;gap:4px}
 .btn-delete-group{background:#333;border:1px solid #555;color:#f44336;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:.8em}
 .btn-delete-group:hover{background:#4a1a1a}
+.top-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5em;margin-bottom:.5em}
+.top-controls{display:flex;gap:.5em;align-items:center}
+.lang-btn{background:#252836;border:1px solid #555;color:#4fc3f7;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:.8em;font-weight:bold}
+.lang-btn:hover{background:#333}
+.tz-select{background:#252836;border:1px solid #555;color:#4fc3f7;padding:4px 8px;border-radius:6px;font-size:.8em}
 </style>
 </head>
 <body>
-<h1>SquareGuardian — Events แยกประเภท</h1>
+<div class="top-bar">
+  <h1>SquareGuardian — Events</h1>
+  <div class="top-controls">
+    <span style="color:#888;font-size:.8em" data-i18n="timezone">เขตเวลา</span>
+    <select class="tz-select" id="tzSelect" onchange="setTimezone(this.value)">%s</select>
+    <button class="lang-btn" id="langToggle" onclick="toggleLang()">EN</button>
+  </div>
+</div>
 <div class="nav">
-  <a href="/">Dashboard</a>
-  <a href="/events" class="active">Events (แยกประเภท)</a>
-  <button class="select-toggle" id="selectToggle" onclick="toggleSelectMode()">เลือกหลายรายการ</button>
+  <a href="/" data-i18n="dashboard">Dashboard</a>
+  <a href="/events" class="active" data-i18n="events_by_type">Events (แยกประเภท)</a>
+  <a href="/faces" data-i18n="face_gallery">Face Gallery</a>
+  <button class="select-toggle" id="selectToggle" onclick="toggleSelectMode()" data-i18n="select_multiple">เลือกหลายรายการ</button>
 </div>
 
-<p style="color:#888;font-size:.85em;margin-bottom:1em">คลิกที่รูปเพื่อระบุตัวตน, ห้อง, ทะเบียนรถ, ยี่ห้อ/สี — กด <strong>"เลือกหลายรายการ"</strong> เพื่อเลือกหลายรูปแล้วจัดกลุ่มเป็นคน/รถ คันเดียวกัน</p>
+<p style="color:#888;font-size:.85em;margin-bottom:1em" data-i18n="click_to_identify">คลิกที่รูปเพื่อระบุตัวตน, ห้อง, ทะเบียนรถ, ยี่ห้อ/สี — กด "เลือกหลายรายการ" เพื่อเลือกหลายรูปแล้วจัดกลุ่มเป็นคน/รถ คันเดียวกัน</p>
 
 %s
 
@@ -951,14 +1219,29 @@ body.select-mode .ident-badge{left:28px}
 </div>
 
 <div class="links" style="margin-top:2em">
-  <a href="/">Dashboard</a>
+  <a href="/" data-i18n="dashboard">Dashboard</a>
   <a href="/api/events">API: Events</a>
   <a href="/api/training-data">API: Training Data</a>
   <a href="/api/groups">API: Groups</a>
 </div>
-<p style="margin-top:1em;color:#666;font-size:.8em">Auto-refresh ทุก 30 วินาที | คลิกที่ภาพเพื่อระบุข้อมูล | กดปุ่ม "เลือกหลายรายการ" เพื่อจัดกลุ่ม</p>
+<p style="margin-top:1em;color:#666;font-size:.8em">Auto-refresh 30s</p>
 
 ` + feedbackScript + `
+` + i18nScript + `
+<script>
+var defaultTZ = '%s';
+function getTimezone() { return localStorage.getItem('sg_tz') || defaultTZ; }
+function setTimezone(tz) {
+  localStorage.setItem('sg_tz', tz);
+  var url = new URL(window.location);
+  url.searchParams.set('tz', tz);
+  window.location = url;
+}
+(function() {
+  var sel = document.getElementById('tzSelect');
+  if (sel) sel.value = getTimezone();
+})();
+</script>
 <script>
 var selectMode = false;
 var selectedEvents = {};

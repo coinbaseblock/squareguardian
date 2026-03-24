@@ -36,7 +36,7 @@ func main() {
 	det.Start()
 	defer det.Stop()
 
-	handler := api.New(det, cfg.CameraZones, cfg.FaceServiceURL)
+	handler := api.New(det, cfg.CameraZones, cfg.FaceServiceURL, cfg.Timezone)
 	srv := &http.Server{
 		Addr:         cfg.ListenAddr,
 		Handler:      handler,
