@@ -131,11 +131,15 @@ for cam in $CAMERAS; do
           input_args: preset-rtsp-restream
           roles:
             - detect
+            - snapshots
     motion:
       mask:
         - 0,0,1,0,1,0.06,0,0.06${ZONES_YAML}
     snapshots:
       enabled: true
+      quality: 95
+      height: 720
+      best_image_timeout: 60
 "
 done
 
@@ -174,10 +178,20 @@ objects:
     - backpack
     - suitcase
     - handbag
+  filters:
+    person:
+      min_score: 0.25
+      threshold: 0.65
+      min_area: 1500
 
 detectors:
   cpu1:
     type: cpu
+
+motion:
+  improve_contrast: true
+  contour_area: 20
+  threshold: 20
 
 go2rtc:
   streams:${GO2RTC_STREAMS}
