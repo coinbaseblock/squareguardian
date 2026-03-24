@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -112,20 +113,62 @@ func (d *Detector) EventsFiltered(labelFilter, cameraFilter string) []Event {
 	return filtered
 }
 
-// Cameras returns a deduplicated list of camera names from cached events.
+// Cameras returns a deduplicated, sorted list of camera names.
+// It queries Frigate's config API for all configured cameras and merges
+// with cameras seen in cached events, so cameras appear even before
+// they generate any detection events.
 func (d *Detector) Cameras() []string {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	seen := make(map[string]bool)
 	var cameras []string
+
+	// First, try to get cameras from Frigate config API.
+	if fc := d.frigateCameras(); len(fc) > 0 {
+		for _, name := range fc {
+			if !seen[name] {
+				seen[name] = true
+				cameras = append(cameras, name)
+			}
+		}
+	}
+
+	// Also include cameras from cached events (fallback / extra coverage).
+	d.mu.RLock()
 	for _, e := range d.events {
 		if e.Camera != "" && !seen[e.Camera] {
 			seen[e.Camera] = true
 			cameras = append(cameras, e.Camera)
 		}
 	}
+	d.mu.RUnlock()
+
+	sort.Strings(cameras)
 	return cameras
+}
+
+// frigateCameras queries Frigate's /api/config and returns configured camera names.
+func (d *Detector) frigateCameras() []string {
+	url := fmt.Sprintf("%s/api/config", d.frigateURL)
+	resp, err := d.client.Get(url)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	var cfg struct {
+		Cameras map[string]json.RawMessage `json:"cameras"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+		return nil
+	}
+
+	names := make([]string, 0, len(cfg.Cameras))
+	for name := range cfg.Cameras {
+		names = append(names, name)
+	}
+	return names
 }
 
 // Annotate updates an event's user-provided fields.
