@@ -467,18 +467,45 @@ func (d *Detector) poll() {
 	d.mu.Unlock()
 
 	// Capture live camera snapshots for active events outside the lock.
-	// Uses /api/{camera}/latest.jpg which returns a fresh frame each time.
-	for eventID, camera := range activeCaptures {
-		d.captureActiveSnapshot(eventID, camera)
+	// Each camera runs in its own goroutine so burst captures don't block each other.
+	if len(activeCaptures) > 0 {
+		var activeWG sync.WaitGroup
+		for eventID, camera := range activeCaptures {
+			activeWG.Add(1)
+			go func(eid, cam string) {
+				defer activeWG.Done()
+				d.captureActiveSnapshot(eid, cam)
+			}(eventID, camera)
+		}
+		activeWG.Wait()
 	}
 
 	// Process completed events and settled events for face identification.
-	// Settled events get burst snapshot selection for the best image quality.
+	// Each camera gets its own goroutine so burst captures run in parallel.
 	allToProcess := append(newEvents, settledEvents...)
+
+	// Group person events by camera for parallel processing.
+	perCamera := make(map[string][]*Event)
 	for i := range allToProcess {
 		if allToProcess[i].Label == "person" {
-			d.identifyPersonEvent(&allToProcess[i])
+			cam := allToProcess[i].Camera
+			perCamera[cam] = append(perCamera[cam], &allToProcess[i])
 		}
+	}
+
+	if len(perCamera) > 0 {
+		var burstWG sync.WaitGroup
+		for cam, events := range perCamera {
+			burstWG.Add(1)
+			go func(camera string, evts []*Event) {
+				defer burstWG.Done()
+				for _, ev := range evts {
+					log.Printf("detector: camera %s: running face-id for event %s", camera, ev.ID)
+					d.identifyPersonEvent(ev)
+				}
+			}(cam, events)
+		}
+		burstWG.Wait()
 	}
 }
 
