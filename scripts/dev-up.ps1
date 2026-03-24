@@ -60,12 +60,13 @@ try {
     Write-Host '|  Web UI                                                  |' -ForegroundColor Cyan
     Write-Host '|    Frigate UI          http://localhost:8971             |' -ForegroundColor Green
     Write-Host '|    Detector Dashboard  http://localhost:8080             |' -ForegroundColor Green
+    Write-Host '|    Face Gallery        http://localhost:8080/faces       |' -ForegroundColor Green
     Write-Host '|    go2rtc Debug        http://localhost:1984             |' -ForegroundColor Green
     Write-Host '+----------------------------------------------------------+' -ForegroundColor Cyan
     Write-Host '|  API (from host)                                         |' -ForegroundColor Cyan
     Write-Host '|    Frigate API         http://localhost:5001             |' -ForegroundColor Green
     Write-Host '|    Detector API        http://localhost:8080             |' -ForegroundColor Green
-    Write-Host '|    Face Service        http://localhost:8082  (optional) |' -ForegroundColor Green
+    Write-Host '|    Face Service        http://localhost:8082             |' -ForegroundColor Green
     Write-Host '+----------------------------------------------------------+' -ForegroundColor Cyan
     Write-Host '|  Inter-container (Docker network)                        |' -ForegroundColor Cyan
     Write-Host '|    Frigate             http://frigate:5000               |' -ForegroundColor DarkGray
@@ -77,7 +78,6 @@ try {
     Write-Host '+----------------------------------------------------------+' -ForegroundColor Cyan
     Write-Host ''
     Write-Host 'Use port 8971 for the Frigate web UI to avoid broken Explore thumbnails.' -ForegroundColor Yellow
-    Write-Host 'Face Service requires profile "identity": docker compose --profile identity up -d' -ForegroundColor Yellow
     Write-Host ''
     Write-Host 'Useful follow-up:' -ForegroundColor Green
     Write-Host '  docker compose logs -f frigate'
