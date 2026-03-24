@@ -1,6 +1,7 @@
 package detector
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -29,6 +30,10 @@ type Detector struct {
 	// Active event tracking: events still in progress (no end_time yet).
 	// We defer face identification until the event settles for a better snapshot.
 	activeEvents map[string]float64 // eventID → first seen timestamp
+
+	// Best snapshot captured while event is active (person still in frame).
+	// Key: eventID, Value: sharpest snapshot captured so far from camera live feed.
+	activeSnapshots map[string]snapshotCandidate
 
 	// Persistent storage
 	dataDir      string
@@ -76,7 +81,8 @@ func New(frigateURL string, trackedItems []string, pollInterval time.Duration, d
 		pollInterval:  pollInterval,
 		client:        &http.Client{Timeout: 10 * time.Second},
 		idSet:         make(map[string]bool),
-		activeEvents:  make(map[string]float64),
+		activeEvents:    make(map[string]float64),
+		activeSnapshots: make(map[string]snapshotCandidate),
 		dataDir:       dataDir,
 		maxBytes:      maxBytes,
 		saveInterval:  time.Duration(saveIntervalS) * time.Second,
@@ -434,7 +440,19 @@ func (d *Detector) poll() {
 					break
 				}
 			}
-			log.Printf("detector: active event %s timed out, processing now", id)
+			log.Printf("detector: active event %s timed out, processing now (has active snapshot: %v)", id, d.activeSnapshots[id].data != nil)
+		}
+	}
+
+	// Capture live snapshots for active events (person still in frame).
+	// This is key: we grab frames while the person is visible, not after they leave.
+	activeCaptures := make(map[string]string) // eventID → camera name
+	for id := range d.activeEvents {
+		for j := range d.events {
+			if d.events[j].ID == id {
+				activeCaptures[id] = d.events[j].Camera
+				break
+			}
 		}
 	}
 
@@ -443,6 +461,12 @@ func (d *Detector) poll() {
 		log.Printf("detector: fetched %d new events (%d total, %d active)", added, len(d.events), len(d.activeEvents))
 	}
 	d.mu.Unlock()
+
+	// Capture live camera snapshots for active events outside the lock.
+	// Uses /api/{camera}/latest.jpg which returns a fresh frame each time.
+	for eventID, camera := range activeCaptures {
+		d.captureActiveSnapshot(eventID, camera)
+	}
 
 	// Process completed events and settled events for face identification.
 	// Settled events get burst snapshot selection for the best image quality.
@@ -454,8 +478,43 @@ func (d *Detector) poll() {
 	}
 }
 
-// identifyPersonEvent runs face identification on a person event with
-// burst snapshot selection and alert cooldown.
+// captureActiveSnapshot fetches a live frame from the camera and keeps the
+// sharpest one seen so far for an active event. Called every poll cycle while
+// the person is still in the frame — this is when we get the best images.
+func (d *Detector) captureActiveSnapshot(eventID, camera string) {
+	url := fmt.Sprintf("%s/api/%s/latest.jpg?h=720", d.frigateURL, camera)
+	resp, err := d.client.Get(url)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+
+	buf := new(bytes.Buffer)
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		return
+	}
+	data := buf.Bytes()
+	score := imageSharpness(data)
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	prev, exists := d.activeSnapshots[eventID]
+	if !exists || score > prev.sharpness {
+		d.activeSnapshots[eventID] = snapshotCandidate{data: data, sharpness: score}
+		if exists {
+			log.Printf("detector: active snapshot for %s improved: %.1f → %.1f", eventID, prev.sharpness, score)
+		} else {
+			log.Printf("detector: active snapshot for %s captured (sharpness=%.1f)", eventID, score)
+		}
+	}
+}
+
+// identifyPersonEvent runs face identification on a person event using
+// the best snapshot from active-phase captures and Frigate's event snapshot.
 func (d *Detector) identifyPersonEvent(ev *Event) {
 	if d.faceClient == nil || ev.Snapshot == "" {
 		return
@@ -469,11 +528,38 @@ func (d *Detector) identifyPersonEvent(ev *Event) {
 		return
 	}
 
-	// Use burst snapshot to get the sharpest image.
-	snapshot, err := fetchBestSnapshot(d.frigateURL, ev.ID, d.burstCount, d.burstInterval)
-	if err != nil {
-		log.Printf("detector: face-id: fetch snapshot for %s: %v", ev.ID, err)
+	// Retrieve the best snapshot captured while the event was active.
+	d.mu.Lock()
+	activeBest, hasActive := d.activeSnapshots[ev.ID]
+	delete(d.activeSnapshots, ev.ID)
+	d.mu.Unlock()
+
+	// Also fetch Frigate's event snapshot (its own best pick).
+	eventSnapshot, err := fetchSnapshot(d.frigateURL, ev.ID)
+	if err != nil && !hasActive {
+		log.Printf("detector: face-id: no snapshot for %s: %v", ev.ID, err)
 		return
+	}
+
+	// Pick the sharpest between active-phase captures and Frigate's event snapshot.
+	var snapshot []byte
+	if err == nil {
+		eventScore := imageSharpness(eventSnapshot)
+		if hasActive && activeBest.sharpness > eventScore {
+			snapshot = activeBest.data
+			log.Printf("detector: face-id %s: using active snapshot (%.1f) over event snapshot (%.1f)",
+				ev.ID, activeBest.sharpness, eventScore)
+		} else {
+			snapshot = eventSnapshot
+			if hasActive {
+				log.Printf("detector: face-id %s: using event snapshot (%.1f) over active snapshot (%.1f)",
+					ev.ID, eventScore, activeBest.sharpness)
+			}
+		}
+	} else {
+		snapshot = activeBest.data
+		log.Printf("detector: face-id %s: using active snapshot (%.1f), event snapshot failed",
+			ev.ID, activeBest.sharpness)
 	}
 
 	result, err := d.faceClient.Identify(snapshot, ev.ID)
