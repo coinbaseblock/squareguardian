@@ -151,6 +151,22 @@ var facesPageTpl = `<!DOCTYPE html>
   .captured-thumb.active { border-color: #2563eb; }
   .capture-actions { display: flex; gap: 0.5em; margin-top: 1em; flex-wrap: wrap; }
   .face-note { background: #1e293b; border-radius: 8px; padding: 0.8em 1em; margin-bottom: 1em; font-size: 0.85em; color: #94a3b8; border-left: 3px solid #3b82f6; }
+
+  /* Detection history */
+  .detection-person { margin-bottom: 1.5em; }
+  .detection-person-header { display: flex; align-items: center; gap: 0.8em; margin-bottom: 0.8em; padding-bottom: 0.5em; border-bottom: 1px solid #2a2d37; }
+  .detection-person-name { font-weight: bold; font-size: 1.05em; }
+  .detection-person-count { color: #9ca3af; font-size: 0.85em; }
+  .detection-person-last { color: #60a5fa; font-size: 0.8em; margin-left: auto; }
+  .detection-grid { display: flex; gap: 0.6em; flex-wrap: wrap; }
+  .detection-card { background: #252830; border-radius: 8px; overflow: hidden; width: 140px; transition: transform 0.2s; cursor: pointer; }
+  .detection-card:hover { transform: translateY(-2px); }
+  .detection-card img { width: 100%%; height: 90px; object-fit: cover; }
+  .detection-card-info { padding: 0.4em 0.6em; font-size: 0.75em; }
+  .detection-card-time { color: #9ca3af; }
+  .detection-card-camera { color: #60a5fa; }
+  .detection-card-score { color: #22c55e; font-size: 0.7em; }
+  .detection-badge { display: inline-block; background: #16a34a; color: white; padding: 0.15em 0.5em; border-radius: 4px; font-size: 0.75em; margin-left: 0.5em; }
 </style>
 </head>
 <body>
@@ -244,6 +260,18 @@ var facesPageTpl = `<!DOCTYPE html>
       </div>
     </div>
   </div>
+
+  <div class="section">
+    <h2>ประวัติการตรวจพบ</h2>
+    <div class="face-note">
+      เมื่อกล้องตรวจพบบุคคลที่ลงทะเบียนแล้ว ระบบจะระบุตัวตนอัตโนมัติและแสดงผลที่นี่
+    </div>
+    <div id="detectionHistory">
+      <div class="empty-state">
+        <p>กำลังโหลด...</p>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -275,25 +303,39 @@ function switchTab(tab) {
 async function loadGallery() {
   const container = document.getElementById('galleryContainer');
   try {
-    const resp = await fetch('/api/face/gallery');
-    if (!resp.ok) throw new Error('Face service unavailable');
-    const data = await resp.json();
+    const [galleryResp, identResp] = await Promise.all([
+      fetch('/api/face/gallery'),
+      fetch('/api/events/identified').catch(() => null)
+    ]);
+    if (!galleryResp.ok) throw new Error('Face service unavailable');
+    const data = await galleryResp.json();
+    const identData = identResp && identResp.ok ? await identResp.json() : {};
+
     if (!data.persons || data.persons.length === 0) {
       container.innerHTML = '<div class="empty-state"><p>ยังไม่มีบุคคลที่ลงทะเบียน</p><p>เพิ่มบุคคลใหม่โดยกรอกชื่อและอัปโหลดภาพด้านบน หรือถ่ายจากกล้อง</p></div>';
       return;
     }
     const initials = (name) => name.charAt(0).toUpperCase();
-    container.innerHTML = '<div class="gallery">' + data.persons.map(p =>
-      '<div class="person-card">' +
+    container.innerHTML = '<div class="gallery">' + data.persons.map(p => {
+      const detections = identData[p.name] || [];
+      const detCount = detections.length;
+      let detInfo = '<div class="person-info" style="color:#6b7280">ยังไม่เคยตรวจพบ</div>';
+      if (detCount > 0) {
+        const lastTime = timeAgo(detections[0].start_time);
+        detInfo = '<div class="person-info" style="color:#22c55e">ตรวจพบ ' + detCount + ' ครั้ง</div>' +
+                  '<div class="person-info" style="color:#60a5fa; font-size:0.75em">ล่าสุด: ' + lastTime + '</div>';
+      }
+      return '<div class="person-card">' +
         '<div class="person-avatar">' + initials(p.name) + '</div>' +
         '<div class="person-name">' + escapeHtml(p.name) + '</div>' +
         '<div class="person-info">' + p.face_count + ' embeddings</div>' +
         '<div class="person-info">แหล่ง: ' + escapeHtml(p.source) + '</div>' +
+        detInfo +
         '<div class="actions">' +
           '<button class="btn btn-danger btn-sm" onclick="deletePerson(\'' + p.id + '\',\'' + escapeHtml(p.name) + '\')">ลบ</button>' +
         '</div>' +
-      '</div>'
-    ).join('') + '</div>';
+      '</div>';
+    }).join('') + '</div>';
   } catch (e) {
     container.innerHTML = '<div class="empty-state"><p>ไม่สามารถเชื่อมต่อ Face Service ได้</p><p>' + escapeHtml(e.message) + '</p></div>';
   }
@@ -516,9 +558,83 @@ function showToast(msg, type) {
   setTimeout(() => { t.style.display = 'none'; }, 4000);
 }
 
+// --- Detection History ---
+async function loadDetectionHistory() {
+  const container = document.getElementById('detectionHistory');
+  try {
+    const resp = await fetch('/api/events/identified');
+    if (!resp.ok) throw new Error('Failed to load events');
+    const data = await resp.json();
+
+    const names = Object.keys(data);
+    if (names.length === 0) {
+      container.innerHTML = '<div class="empty-state"><p>ยังไม่มีการตรวจพบบุคคลที่ลงทะเบียน</p><p>เมื่อกล้องตรวจพบใบหน้าที่ตรงกับบุคคลที่ลงทะเบียน จะแสดงที่นี่อัตโนมัติ</p></div>';
+      return;
+    }
+
+    let html = '';
+    for (const name of names) {
+      const events = data[name];
+      if (!events || events.length === 0) continue;
+
+      const lastEvent = events[0];
+      const lastTime = new Date(lastEvent.start_time * 1000);
+      const ago = timeAgo(lastEvent.start_time);
+
+      html += '<div class="detection-person">';
+      html += '<div class="detection-person-header">';
+      html += '<span class="detection-person-name">' + escapeHtml(name) + '</span>';
+      html += '<span class="detection-badge">ตรวจพบ</span>';
+      html += '<span class="detection-person-count">' + events.length + ' ครั้ง</span>';
+      html += '<span class="detection-person-last">ล่าสุด: ' + ago + '</span>';
+      html += '</div>';
+      html += '<div class="detection-grid">';
+
+      for (const ev of events) {
+        const t = new Date(ev.start_time * 1000);
+        const ts = t.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+        const ds = t.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+        const thumbSrc = ev.thumbnail
+          ? 'data:image/jpeg;base64,' + ev.thumbnail
+          : '/api/thumbnail/' + ev.id;
+        const note = ev.note || '';
+        const scoreMatch = note.match(/(\d+)%%/);
+        const score = scoreMatch ? scoreMatch[1] + '%%' : '';
+
+        html += '<div class="detection-card" onclick="window.open(\'/events\', \'_blank\')">';
+        html += '<img src="' + thumbSrc + '" alt="' + escapeHtml(name) + '" loading="lazy">';
+        html += '<div class="detection-card-info">';
+        html += '<div class="detection-card-time">' + ds + ' ' + ts + '</div>';
+        html += '<div class="detection-card-camera">' + escapeHtml(ev.camera) + '</div>';
+        if (score) html += '<div class="detection-card-score">ความคล้าย: ' + score + '</div>';
+        html += '</div></div>';
+      }
+
+      html += '</div></div>';
+    }
+
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = '<div class="empty-state"><p>ไม่สามารถโหลดประวัติการตรวจพบ</p><p>' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function timeAgo(timestamp) {
+  const now = Date.now() / 1000;
+  const diff = now - timestamp;
+  if (diff < 60) return 'เมื่อสักครู่';
+  if (diff < 3600) return Math.floor(diff / 60) + ' นาทีที่แล้ว';
+  if (diff < 86400) return Math.floor(diff / 3600) + ' ชั่วโมงที่แล้ว';
+  return Math.floor(diff / 86400) + ' วันที่แล้ว';
+}
+
 // Init
 loadGallery();
+loadDetectionHistory();
 renderPoseGuide();
+
+// Auto-refresh detection history every 30 seconds
+setInterval(loadDetectionHistory, 30000);
 </script>
 </body>
 </html>

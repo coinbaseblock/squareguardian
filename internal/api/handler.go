@@ -47,6 +47,7 @@ func New(det *detector.Detector, cameraZones map[string]string, faceServiceURL s
 	h.mux.HandleFunc("/api/groups", h.groups)
 	h.mux.HandleFunc("/api/groups/delete", h.deleteGroup)
 	h.mux.HandleFunc("/api/training-data", h.trainingData)
+	h.mux.HandleFunc("/api/events/identified", h.identifiedEvents)
 	h.mux.HandleFunc("/api/cameras", h.cameras)
 	h.mux.HandleFunc("/api/camera-snapshot/", h.cameraSnapshot)
 	h.mux.HandleFunc("/api/face/", h.faceProxy)
@@ -265,6 +266,11 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 		"count":  len(events),
 		"events": events,
 	})
+}
+
+func (h *Handler) identifiedEvents(w http.ResponseWriter, _ *http.Request) {
+	identified := h.det.IdentifiedEvents(10) // up to 10 events per person
+	writeJSON(w, http.StatusOK, identified)
 }
 
 func (h *Handler) cameras(w http.ResponseWriter, _ *http.Request) {
