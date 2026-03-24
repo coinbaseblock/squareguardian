@@ -113,6 +113,25 @@ func (d *Detector) EventsFiltered(labelFilter, cameraFilter string) []Event {
 	return filtered
 }
 
+// IdentifiedEvents returns events that have been identified, grouped by identity name.
+// Each identity maps to a slice of events sorted by most recent first (up to limit per identity).
+func (d *Detector) IdentifiedEvents(limit int) map[string][]Event {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	result := make(map[string][]Event)
+	for _, e := range d.events {
+		if e.Identity == "" {
+			continue
+		}
+		if limit > 0 && len(result[e.Identity]) >= limit {
+			continue
+		}
+		result[e.Identity] = append(result[e.Identity], e)
+	}
+	return result
+}
+
 // Cameras returns a deduplicated, sorted list of camera names.
 // It queries Frigate's config API for all configured cameras and merges
 // with cameras seen in cached events, so cameras appear even before
