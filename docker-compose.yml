@@ -85,8 +85,8 @@ services:
       - ./storage/face-db:/data
     environment:
       MODEL_NAME: ${FACE_MODEL_NAME:-buffalo_s}
-      MATCH_THRESHOLD: ${FACE_MATCH_THRESHOLD:-0.45}
-      SUGGEST_THRESHOLD: ${FACE_SUGGEST_THRESHOLD:-0.35}
+      MATCH_THRESHOLD: ${FACE_MATCH_THRESHOLD:-0.55}
+      SUGGEST_THRESHOLD: ${FACE_SUGGEST_THRESHOLD:-0.45}
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8082/health')\""]
       interval: 10s

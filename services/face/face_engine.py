@@ -47,8 +47,8 @@ def compute_similarity(emb1: np.ndarray, emb2: np.ndarray) -> float:
 def identify(
     query_embedding: np.ndarray,
     known_embeddings: list[tuple[str, str, np.ndarray]],
-    match_threshold: float = 0.45,
-    suggest_threshold: float = 0.35,
+    match_threshold: float = 0.55,
+    suggest_threshold: float = 0.45,
 ) -> Optional[dict]:
     """Match a face embedding against known persons.
 

@@ -19,8 +19,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = os.getenv("MODEL_NAME", "buffalo_s")
-MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.45"))
-SUGGEST_THRESHOLD = float(os.getenv("SUGGEST_THRESHOLD", "0.35"))
+MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.55"))
+SUGGEST_THRESHOLD = float(os.getenv("SUGGEST_THRESHOLD", "0.45"))
 
 
 @asynccontextmanager
@@ -111,7 +111,7 @@ def identify(req: IdentifyRequest):
                     result["status"],
                 )
                 # Auto-learn: if high-confidence match, add embedding to improve accuracy
-                if result["status"] == "match" and result["similarity"] >= 0.55:
+                if result["status"] == "match" and result["similarity"] >= 0.65:
                     store.add_embedding(
                         result["person_id"],
                         face["embedding"],
@@ -119,7 +119,7 @@ def identify(req: IdentifyRequest):
                         quality=face["confidence"],
                     )
 
-    return {"matches": matches, "faces_detected": len(faces)}
+    return {"matches": matches, "faces_detected": len(faces), "has_unknown": len(faces) > len(matches)}
 
 
 @app.post("/api/face/register")
@@ -162,6 +162,13 @@ def delete_person(person_id: str):
     if store.delete_person(person_id):
         return {"status": "deleted"}
     raise HTTPException(404, "person not found")
+
+
+@app.delete("/api/face/gallery/{person_id}/auto-embeddings")
+def delete_auto_embeddings(person_id: str):
+    """Delete all auto-learned embeddings for a person (keep manual ones)."""
+    count = store.delete_auto_embeddings(person_id)
+    return {"status": "deleted", "deleted_count": count}
 
 
 @app.post("/api/face/compare")
