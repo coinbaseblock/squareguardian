@@ -388,21 +388,25 @@ func (d *Detector) poll() {
 
 		// Check if this is an active event that just ended (settled).
 		if _, wasActive := d.activeEvents[raw[i].ID]; wasActive {
-			if raw[i].EndTime != nil {
-				// Event settled — person left the frame, Frigate has the best snapshot now.
-				delete(d.activeEvents, raw[i].ID)
-				// Update the event's end time and score in our cache.
-				for j := range d.events {
-					if d.events[j].ID == raw[i].ID {
+			// Always update score while event is active (Frigate improves it over time).
+			for j := range d.events {
+				if d.events[j].ID == raw[i].ID {
+					newScore := raw[i].BestScore()
+					if newScore > d.events[j].TopScore {
+						d.events[j].TopScore = newScore
+						d.dirty = true
+					}
+					if raw[i].EndTime != nil {
+						// Event settled — person left the frame.
+						delete(d.activeEvents, raw[i].ID)
 						d.events[j].EndTime = *raw[i].EndTime
-						d.events[j].TopScore = raw[i].BestScore()
 						if raw[i].HasSnapshot {
 							d.events[j].Snapshot = raw[i].ID
 						}
 						settledEvents = append(settledEvents, d.events[j])
 						d.dirty = true
-						break
 					}
+					break
 				}
 			}
 			continue
@@ -478,25 +482,42 @@ func (d *Detector) poll() {
 	}
 }
 
-// captureActiveSnapshot fetches a live frame from the camera and keeps the
-// sharpest one seen so far for an active event. Called every poll cycle while
-// the person is still in the frame — this is when we get the best images.
+// captureActiveSnapshot fetches a cropped event snapshot while the person is
+// still in the frame. Uses Frigate's event snapshot API (crop=1) to get an
+// image focused on the detected person, which is much better for face
+// recognition than a full camera frame. Falls back to the camera's live
+// latest.jpg if the event snapshot is not yet available.
 func (d *Detector) captureActiveSnapshot(eventID, camera string) {
-	url := fmt.Sprintf("%s/api/%s/latest.jpg?h=720", d.frigateURL, camera)
-	resp, err := d.client.Get(url)
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return
+	// Prefer cropped event snapshot (focused on the detected person).
+	var data []byte
+	cropURL := fmt.Sprintf("%s/api/events/%s/snapshot.jpg?crop=1&h=720&quality=95", d.frigateURL, eventID)
+	resp, err := d.client.Get(cropURL)
+	if err == nil {
+		buf := new(bytes.Buffer)
+		if _, readErr := buf.ReadFrom(resp.Body); readErr == nil && resp.StatusCode == http.StatusOK && buf.Len() > 1000 {
+			data = buf.Bytes()
+		}
+		resp.Body.Close()
 	}
 
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(resp.Body); err != nil {
-		return
+	// Fallback to full camera frame if cropped snapshot not available.
+	if data == nil {
+		fullURL := fmt.Sprintf("%s/api/%s/latest.jpg?h=720", d.frigateURL, camera)
+		resp, err = d.client.Get(fullURL)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return
+		}
+		buf := new(bytes.Buffer)
+		if _, err := buf.ReadFrom(resp.Body); err != nil {
+			return
+		}
+		data = buf.Bytes()
 	}
-	data := buf.Bytes()
+
 	score := imageSharpness(data)
 
 	d.mu.Lock()
