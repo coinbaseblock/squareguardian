@@ -56,16 +56,10 @@ func (h *Handler) facesPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get nav bar consistent with other pages
-	navLinks := []struct{ href, label, active string }{
-		{"/", "Dashboard", ""},
-		{"/events", "Events", ""},
-		{"/faces", "Face Gallery", " active"},
-	}
-	navHTML := ""
-	for _, n := range navLinks {
-		navHTML += fmt.Sprintf(`<a href="%s" class="nav-link%s">%s</a>`, n.href, n.active, n.label)
-	}
+	navHTML := `<a href="/" class="nav-link" data-i18n="dashboard">Dashboard</a>` +
+		`<a href="/events" class="nav-link" data-i18n="events_by_type">Events</a>` +
+		`<a href="/faces" class="nav-link active" data-i18n="face_gallery">Face Gallery</a>` +
+		`<button class="lang-btn" id="langToggle" onclick="toggleLang()" style="margin-left:auto;background:#252836;border:1px solid #555;color:#4fc3f7;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:.8em;font-weight:bold">EN</button>`
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, facesPageTpl, navHTML, statusClass, faceServiceStatus)
@@ -636,6 +630,7 @@ renderPoseGuide();
 // Auto-refresh detection history every 30 seconds
 setInterval(loadDetectionHistory, 30000);
 </script>
+` + i18nScript + `
 </body>
 </html>
 `

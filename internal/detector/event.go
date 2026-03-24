@@ -42,12 +42,21 @@ type FrigateEvent struct {
 	Camera      string   `json:"camera"`
 	Label       string   `json:"label"`
 	SubLabel    *string  `json:"sub_label"`
-	TopScore    float64  `json:"top_score"`
+	Score       float64  `json:"score"`     // current frame score
+	TopScore    float64  `json:"top_score"` // highest score across all frames
 	StartTime   float64  `json:"start_time"`
 	EndTime     *float64 `json:"end_time"`
 	Zones       []string `json:"zones"`
 	Thumbnail   string   `json:"thumbnail"`
 	HasSnapshot bool     `json:"has_snapshot"`
+}
+
+// BestScore returns the highest available confidence score.
+func (fe *FrigateEvent) BestScore() float64 {
+	if fe.TopScore > fe.Score {
+		return fe.TopScore
+	}
+	return fe.Score
 }
 
 // ToEvent converts a FrigateEvent to our internal Event representation.
@@ -56,7 +65,7 @@ func (fe *FrigateEvent) ToEvent() Event {
 		ID:        fe.ID,
 		Camera:    fe.Camera,
 		Label:     fe.Label,
-		TopScore:  fe.TopScore,
+		TopScore:  fe.BestScore(),
 		StartTime: fe.StartTime,
 		Thumbnail: fe.Thumbnail,
 	}
