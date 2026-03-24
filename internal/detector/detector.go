@@ -26,6 +26,10 @@ type Detector struct {
 	idSet  map[string]bool // deduplication set
 	groups []EventGroup    // named groups of events
 
+	// Active event tracking: events still in progress (no end_time yet).
+	// We defer face identification until the event settles for a better snapshot.
+	activeEvents map[string]float64 // eventID → first seen timestamp
+
 	// Persistent storage
 	dataDir      string
 	maxBytes     int64 // max storage bytes before cleanup
@@ -35,11 +39,20 @@ type Detector struct {
 	// Face identification
 	faceClient *FaceClient
 
+	// Snapshot burst settings
+	burstCount    int
+	burstInterval time.Duration
+
+	// Alert cooldown: camera:identity → last alert time
+	cooldownMu  sync.RWMutex
+	alertCooldown map[string]time.Time
+	cooldownDur   time.Duration
+
 	stopCh chan struct{}
 }
 
 // New creates a new Detector instance with disk-backed storage.
-func New(frigateURL string, trackedItems []string, pollInterval time.Duration, dataDir string, maxStorageGB, bufferGB, saveIntervalS int, faceServiceURL string) *Detector {
+func New(frigateURL string, trackedItems []string, pollInterval time.Duration, dataDir string, maxStorageGB, bufferGB, saveIntervalS int, faceServiceURL string, burstCount, burstIntervalMS, alertCooldownSec int) *Detector {
 	items := make(map[string]bool, len(trackedItems))
 	for _, item := range trackedItems {
 		items[strings.TrimSpace(item)] = true
@@ -48,17 +61,31 @@ func New(frigateURL string, trackedItems []string, pollInterval time.Duration, d
 	if maxBytes < 0 {
 		maxBytes = 0
 	}
+	if burstCount < 1 {
+		burstCount = 1
+	}
+	if burstIntervalMS < 100 {
+		burstIntervalMS = 100
+	}
+	if alertCooldownSec < 0 {
+		alertCooldownSec = 0
+	}
 	return &Detector{
-		frigateURL:   strings.TrimRight(frigateURL, "/"),
-		trackedItems: items,
-		pollInterval: pollInterval,
-		client:       &http.Client{Timeout: 10 * time.Second},
-		idSet:        make(map[string]bool),
-		dataDir:      dataDir,
-		maxBytes:     maxBytes,
-		saveInterval: time.Duration(saveIntervalS) * time.Second,
-		faceClient:   NewFaceClient(faceServiceURL),
-		stopCh:       make(chan struct{}),
+		frigateURL:    strings.TrimRight(frigateURL, "/"),
+		trackedItems:  items,
+		pollInterval:  pollInterval,
+		client:        &http.Client{Timeout: 10 * time.Second},
+		idSet:         make(map[string]bool),
+		activeEvents:  make(map[string]float64),
+		dataDir:       dataDir,
+		maxBytes:      maxBytes,
+		saveInterval:  time.Duration(saveIntervalS) * time.Second,
+		faceClient:    NewFaceClient(faceServiceURL),
+		burstCount:    burstCount,
+		burstInterval: time.Duration(burstIntervalMS) * time.Millisecond,
+		alertCooldown: make(map[string]time.Time),
+		cooldownDur:   time.Duration(alertCooldownSec) * time.Second,
+		stopCh:        make(chan struct{}),
 	}
 }
 
@@ -322,7 +349,8 @@ func (d *Detector) saveLoop() {
 }
 
 func (d *Detector) poll() {
-	url := fmt.Sprintf("%s/api/events?limit=50", d.frigateURL)
+	// Use include_thumbnails=0 for faster polling; thumbnails are fetched on demand.
+	url := fmt.Sprintf("%s/api/events?limit=50&include_thumbnails=0", d.frigateURL)
 	resp, err := d.client.Get(url)
 	if err != nil {
 		log.Printf("detector: poll error: %v", err)
@@ -345,42 +373,189 @@ func (d *Detector) poll() {
 
 	added := 0
 	var newEvents []Event
+	var settledEvents []Event // events that were active and now have end_time
+
 	for i := range raw {
 		if !d.trackedItems[raw[i].Label] {
 			continue
 		}
-		if d.idSet[raw[i].ID] {
-			continue // deduplicate
-		}
-		ev := raw[i].ToEvent()
-		d.events = append([]Event{ev}, d.events...)
-		d.idSet[ev.ID] = true
-		newEvents = append(newEvents, ev)
-		added++
-	}
 
-	if added > 0 {
-		d.dirty = true
-		log.Printf("detector: fetched %d new events (%d total cached)", added, len(d.events))
-	}
-	d.mu.Unlock()
-
-	// Face identification runs outside the lock to avoid blocking polls
-	for i := range newEvents {
-		if newEvents[i].Label == "person" {
-			d.identifyNewEvent(&newEvents[i])
-			if newEvents[i].Identity != "" || newEvents[i].Note != "" {
-				d.mu.Lock()
+		// Check if this is an active event that just ended (settled).
+		if _, wasActive := d.activeEvents[raw[i].ID]; wasActive {
+			if raw[i].EndTime != nil {
+				// Event settled — person left the frame, Frigate has the best snapshot now.
+				delete(d.activeEvents, raw[i].ID)
+				// Update the event's end time and score in our cache.
 				for j := range d.events {
-					if d.events[j].ID == newEvents[i].ID {
-						d.events[j].Identity = newEvents[i].Identity
-						d.events[j].Note = newEvents[i].Note
+					if d.events[j].ID == raw[i].ID {
+						d.events[j].EndTime = *raw[i].EndTime
+						d.events[j].TopScore = raw[i].TopScore
+						if raw[i].HasSnapshot {
+							d.events[j].Snapshot = raw[i].ID
+						}
+						settledEvents = append(settledEvents, d.events[j])
 						d.dirty = true
 						break
 					}
 				}
-				d.mu.Unlock()
 			}
+			continue
+		}
+
+		if d.idSet[raw[i].ID] {
+			continue // already processed
+		}
+
+		ev := raw[i].ToEvent()
+		d.events = append([]Event{ev}, d.events...)
+		d.idSet[ev.ID] = true
+		added++
+
+		if raw[i].EndTime == nil {
+			// Event is still active (person still in frame).
+			// Track it and defer face identification until it settles.
+			d.activeEvents[ev.ID] = ev.StartTime
+			log.Printf("detector: tracking active event %s (%s on %s)", ev.ID, ev.Label, ev.Camera)
+		} else {
+			// Event already completed — process immediately.
+			newEvents = append(newEvents, ev)
+		}
+	}
+
+	// Clean up stale active events (older than 2 minutes with no update).
+	now := float64(time.Now().Unix())
+	for id, startTime := range d.activeEvents {
+		if now-startTime > 120 {
+			delete(d.activeEvents, id)
+			// Find and add to settled for face identification
+			for j := range d.events {
+				if d.events[j].ID == id {
+					settledEvents = append(settledEvents, d.events[j])
+					break
+				}
+			}
+			log.Printf("detector: active event %s timed out, processing now", id)
+		}
+	}
+
+	if added > 0 {
+		d.dirty = true
+		log.Printf("detector: fetched %d new events (%d total, %d active)", added, len(d.events), len(d.activeEvents))
+	}
+	d.mu.Unlock()
+
+	// Process completed events and settled events for face identification.
+	// Settled events get burst snapshot selection for the best image quality.
+	allToProcess := append(newEvents, settledEvents...)
+	for i := range allToProcess {
+		if allToProcess[i].Label == "person" {
+			d.identifyPersonEvent(&allToProcess[i])
+		}
+	}
+}
+
+// identifyPersonEvent runs face identification on a person event with
+// burst snapshot selection and alert cooldown.
+func (d *Detector) identifyPersonEvent(ev *Event) {
+	if d.faceClient == nil || ev.Snapshot == "" {
+		return
+	}
+
+	// Check alert cooldown: skip face identification if we recently
+	// identified someone on this camera.
+	cooldownKey := ev.Camera + ":" + ev.ID
+	if d.isOnCooldown(ev.Camera) {
+		log.Printf("detector: skipping face-id for %s (camera %s on cooldown)", ev.ID, ev.Camera)
+		return
+	}
+
+	// Use burst snapshot to get the sharpest image.
+	snapshot, err := fetchBestSnapshot(d.frigateURL, ev.ID, d.burstCount, d.burstInterval)
+	if err != nil {
+		log.Printf("detector: face-id: fetch snapshot for %s: %v", ev.ID, err)
+		return
+	}
+
+	result, err := d.faceClient.Identify(snapshot, ev.ID)
+	if err != nil {
+		log.Printf("detector: face-id: identify %s: %v", ev.ID, err)
+		return
+	}
+
+	identified := false
+	if len(result.Matches) == 0 {
+		if result.HasUnknown {
+			ev.Identity = "คนภายนอก"
+			ev.Note = "auto: ตรวจพบคนภายนอก (ไม่ตรงกับบุคคลที่ลงทะเบียน)"
+			log.Printf("detector: face-id: %s → unknown person", ev.ID)
+			identified = true
+			cooldownKey = ev.Camera + ":unknown"
+		}
+	} else {
+		best := result.Matches[0]
+		if best.Status == "match" {
+			ev.Identity = best.Name
+			ev.Note = fmt.Sprintf("auto: ระบุตัวตน %s (%.0f%%)", best.Name, best.Similarity*100)
+			log.Printf("detector: face-id: %s → %s (%.2f)", ev.ID, best.Name, best.Similarity)
+			identified = true
+			cooldownKey = ev.Camera + ":" + best.Name
+		} else if best.Status == "suggest" {
+			ev.Note = fmt.Sprintf("auto: อาจเป็น %s (%.0f%%)", best.Name, best.Similarity*100)
+			log.Printf("detector: face-id: %s → suggest %s (%.2f)", ev.ID, best.Name, best.Similarity)
+		}
+	}
+
+	// Update the event in cache.
+	if ev.Identity != "" || ev.Note != "" {
+		d.mu.Lock()
+		for j := range d.events {
+			if d.events[j].ID == ev.ID {
+				d.events[j].Identity = ev.Identity
+				d.events[j].Note = ev.Note
+				d.dirty = true
+				break
+			}
+		}
+		d.mu.Unlock()
+	}
+
+	// Set cooldown if we identified someone.
+	if identified && d.cooldownDur > 0 {
+		d.setCooldown(cooldownKey)
+	}
+}
+
+// isOnCooldown checks if the given camera recently had an alert.
+func (d *Detector) isOnCooldown(camera string) bool {
+	if d.cooldownDur <= 0 {
+		return false
+	}
+	d.cooldownMu.RLock()
+	defer d.cooldownMu.RUnlock()
+
+	// Check all cooldown keys for this camera.
+	now := time.Now()
+	for key, lastAlert := range d.alertCooldown {
+		if strings.HasPrefix(key, camera+":") {
+			if now.Sub(lastAlert) < d.cooldownDur {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// setCooldown records an alert time for cooldown tracking.
+func (d *Detector) setCooldown(key string) {
+	d.cooldownMu.Lock()
+	defer d.cooldownMu.Unlock()
+	d.alertCooldown[key] = time.Now()
+
+	// Clean up old cooldown entries.
+	now := time.Now()
+	for k, t := range d.alertCooldown {
+		if now.Sub(t) > d.cooldownDur*2 {
+			delete(d.alertCooldown, k)
 		}
 	}
 }

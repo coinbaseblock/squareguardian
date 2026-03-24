@@ -32,6 +32,13 @@ type Config struct {
 
 	// Face service
 	FaceServiceURL string
+
+	// Snapshot burst: capture multiple snapshots and pick the sharpest one
+	SnapshotBurstCount      int // number of snapshots per event (default 3)
+	SnapshotBurstIntervalMS int // milliseconds between burst captures (default 500)
+
+	// Alert cooldown: avoid re-alerting for the same person on the same camera
+	AlertCooldownSec int // seconds to suppress duplicate alerts (default 300 = 5 min)
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -39,17 +46,20 @@ func Load() *Config {
 	return &Config{
 		FrigateURL:   getEnv("FRIGATE_URL", "http://frigate:5000"),
 		ListenAddr:   getEnv("LISTEN_ADDR", ":8080"),
-		PollInterval: getDuration("POLL_INTERVAL_SEC", 5),
+		PollInterval: getDuration("POLL_INTERVAL_SEC", 2),
 		TrackedItems: getList("TRACKED_ITEMS", []string{
 			"person", "car", "motorcycle", "bus", "truck",
 			"backpack", "suitcase", "handbag",
 		}),
-		CameraZones:   loadCameraZones(),
-		EventLogPath:  getEnv("EVENT_LOG_PATH", "/data/events"),
-		MaxStorageGB:  getInt("MAX_STORAGE_GB", 256),
-		BufferGB:      getInt("BUFFER_GB", 10),
-		SaveIntervalS:  getInt("SAVE_INTERVAL_SEC", 30),
-		FaceServiceURL: getEnv("FACE_SERVICE_URL", ""),
+		CameraZones:            loadCameraZones(),
+		EventLogPath:           getEnv("EVENT_LOG_PATH", "/data/events"),
+		MaxStorageGB:           getInt("MAX_STORAGE_GB", 256),
+		BufferGB:               getInt("BUFFER_GB", 10),
+		SaveIntervalS:          getInt("SAVE_INTERVAL_SEC", 30),
+		FaceServiceURL:         getEnv("FACE_SERVICE_URL", ""),
+		SnapshotBurstCount:     getInt("SNAPSHOT_BURST_COUNT", 3),
+		SnapshotBurstIntervalMS: getInt("SNAPSHOT_BURST_INTERVAL_MS", 500),
+		AlertCooldownSec:       getInt("ALERT_COOLDOWN_SEC", 300),
 	}
 }
 
