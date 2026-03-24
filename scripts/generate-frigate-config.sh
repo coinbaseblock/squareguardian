@@ -139,7 +139,6 @@ for cam in $CAMERAS; do
       enabled: true
       quality: 95
       height: 720
-      best_image_timeout: 60
 "
 done
 
