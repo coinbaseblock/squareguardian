@@ -48,6 +48,7 @@ func New(det *detector.Detector, cameraZones map[string]string, faceServiceURL s
 	h.mux.HandleFunc("/api/groups/delete", h.deleteGroup)
 	h.mux.HandleFunc("/api/training-data", h.trainingData)
 	h.mux.HandleFunc("/api/cameras", h.cameras)
+	h.mux.HandleFunc("/api/camera-snapshot/", h.cameraSnapshot)
 	h.mux.HandleFunc("/api/face/", h.faceProxy)
 	return h
 }
@@ -346,6 +347,16 @@ func (h *Handler) snapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.proxyFrigate(w, fmt.Sprintf("/api/events/%s/snapshot.jpg", eventID))
+}
+
+// cameraSnapshot returns the latest frame from a camera via Frigate.
+func (h *Handler) cameraSnapshot(w http.ResponseWriter, r *http.Request) {
+	camera := strings.TrimPrefix(r.URL.Path, "/api/camera-snapshot/")
+	if camera == "" {
+		http.Error(w, "camera name required", http.StatusBadRequest)
+		return
+	}
+	h.proxyFrigate(w, fmt.Sprintf("/api/%s/latest.jpg?h=720", camera))
 }
 
 func (h *Handler) group(w http.ResponseWriter, r *http.Request) {
