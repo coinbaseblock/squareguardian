@@ -68,10 +68,12 @@ services:
       - ./storage/events:/data/events
       - ./config/frigate:/config:ro
     depends_on:
-      - frigate
+      frigate:
+        condition: service_healthy
+      face-service:
+        condition: service_healthy
 
   face-service:
-    profiles: ["identity"]
     container_name: squareguardian-face
     build:
       context: ./services/face
