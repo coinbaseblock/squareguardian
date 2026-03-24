@@ -29,7 +29,7 @@ func fetchBestSnapshot(frigateURL, eventID string, burstCount int, burstInterval
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	url := fmt.Sprintf("%s/api/events/%s/snapshot.jpg", frigateURL, eventID)
+	url := fmt.Sprintf("%s/api/events/%s/snapshot.jpg?crop=1&h=720&quality=95", frigateURL, eventID)
 
 	var best snapshotCandidate
 	fetched := 0

@@ -514,17 +514,9 @@ func (d *Detector) captureActiveSnapshot(eventID, camera string) {
 }
 
 // identifyPersonEvent runs face identification on a person event using
-// the best snapshot from active-phase captures and Frigate's event snapshot.
+// the best snapshot from burst captures and active-phase captures.
 func (d *Detector) identifyPersonEvent(ev *Event) {
 	if d.faceClient == nil || ev.Snapshot == "" {
-		return
-	}
-
-	// Check alert cooldown: skip face identification if we recently
-	// identified someone on this camera.
-	cooldownKey := ev.Camera + ":" + ev.ID
-	if d.isOnCooldown(ev.Camera) {
-		log.Printf("detector: skipping face-id for %s (camera %s on cooldown)", ev.ID, ev.Camera)
 		return
 	}
 
@@ -534,31 +526,33 @@ func (d *Detector) identifyPersonEvent(ev *Event) {
 	delete(d.activeSnapshots, ev.ID)
 	d.mu.Unlock()
 
-	// Also fetch Frigate's event snapshot (its own best pick).
-	eventSnapshot, err := fetchSnapshot(d.frigateURL, ev.ID)
+	// Use burst snapshot selection: fetch multiple cropped snapshots from
+	// Frigate and pick the sharpest. The burst function requests cropped images
+	// focused on the detected person for better face detection.
+	burstSnapshot, err := fetchBestSnapshot(d.frigateURL, ev.ID, d.burstCount, d.burstInterval)
 	if err != nil && !hasActive {
 		log.Printf("detector: face-id: no snapshot for %s: %v", ev.ID, err)
 		return
 	}
 
-	// Pick the sharpest between active-phase captures and Frigate's event snapshot.
+	// Pick the sharpest between active-phase captures and burst snapshot.
 	var snapshot []byte
 	if err == nil {
-		eventScore := imageSharpness(eventSnapshot)
-		if hasActive && activeBest.sharpness > eventScore {
+		burstScore := imageSharpness(burstSnapshot)
+		if hasActive && activeBest.sharpness > burstScore {
 			snapshot = activeBest.data
-			log.Printf("detector: face-id %s: using active snapshot (%.1f) over event snapshot (%.1f)",
-				ev.ID, activeBest.sharpness, eventScore)
+			log.Printf("detector: face-id %s: using active snapshot (%.1f) over burst snapshot (%.1f)",
+				ev.ID, activeBest.sharpness, burstScore)
 		} else {
-			snapshot = eventSnapshot
+			snapshot = burstSnapshot
 			if hasActive {
-				log.Printf("detector: face-id %s: using event snapshot (%.1f) over active snapshot (%.1f)",
-					ev.ID, eventScore, activeBest.sharpness)
+				log.Printf("detector: face-id %s: using burst snapshot (%.1f) over active snapshot (%.1f)",
+					ev.ID, burstScore, activeBest.sharpness)
 			}
 		}
 	} else {
 		snapshot = activeBest.data
-		log.Printf("detector: face-id %s: using active snapshot (%.1f), event snapshot failed",
+		log.Printf("detector: face-id %s: using active snapshot (%.1f), burst snapshot failed",
 			ev.ID, activeBest.sharpness)
 	}
 
@@ -569,11 +563,18 @@ func (d *Detector) identifyPersonEvent(ev *Event) {
 	}
 
 	identified := false
+	cooldownKey := ev.Camera + ":" + ev.ID
 	if len(result.Matches) == 0 {
-		if result.HasUnknown {
+		// Mark as unknown outsider if faces were detected but none matched,
+		// OR if no faces were detected at all (person too far / facing away).
+		if result.HasUnknown || result.FacesDetected == 0 {
 			ev.Identity = "คนภายนอก"
-			ev.Note = "auto: ตรวจพบคนภายนอก (ไม่ตรงกับบุคคลที่ลงทะเบียน)"
-			log.Printf("detector: face-id: %s → unknown person", ev.ID)
+			if result.FacesDetected > 0 {
+				ev.Note = "auto: ตรวจพบคนภายนอก (ไม่ตรงกับบุคคลที่ลงทะเบียน)"
+			} else {
+				ev.Note = "auto: ตรวจพบบุคคล (ไม่สามารถตรวจจับใบหน้าได้)"
+			}
+			log.Printf("detector: face-id: %s → unknown person (faces_detected=%d)", ev.ID, result.FacesDetected)
 			identified = true
 			cooldownKey = ev.Camera + ":unknown"
 		}
@@ -605,30 +606,27 @@ func (d *Detector) identifyPersonEvent(ev *Event) {
 		d.mu.Unlock()
 	}
 
-	// Set cooldown if we identified someone.
+	// Set cooldown per identity (not per camera) to avoid blocking
+	// identification of different people on the same camera.
 	if identified && d.cooldownDur > 0 {
 		d.setCooldown(cooldownKey)
 	}
 }
 
-// isOnCooldown checks if the given camera recently had an alert.
-func (d *Detector) isOnCooldown(camera string) bool {
+// isOnCooldown checks if the given camera+identity pair recently had an alert.
+// Uses exact key match so different persons on the same camera are not blocked.
+func (d *Detector) isOnCooldown(key string) bool {
 	if d.cooldownDur <= 0 {
 		return false
 	}
 	d.cooldownMu.RLock()
 	defer d.cooldownMu.RUnlock()
 
-	// Check all cooldown keys for this camera.
-	now := time.Now()
-	for key, lastAlert := range d.alertCooldown {
-		if strings.HasPrefix(key, camera+":") {
-			if now.Sub(lastAlert) < d.cooldownDur {
-				return true
-			}
-		}
+	lastAlert, exists := d.alertCooldown[key]
+	if !exists {
+		return false
 	}
-	return false
+	return time.Since(lastAlert) < d.cooldownDur
 }
 
 // setCooldown records an alert time for cooldown tracking.
