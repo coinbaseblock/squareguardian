@@ -63,7 +63,7 @@ services:
       MAX_STORAGE_GB: ${MAX_STORAGE_GB:-256}
       BUFFER_GB: ${BUFFER_GB:-10}
       SAVE_INTERVAL_SEC: ${SAVE_INTERVAL_SEC:-30}
-      FACE_SERVICE_URL: ${FACE_SERVICE_URL:-}
+      FACE_SERVICE_URL: ${FACE_SERVICE_URL:-http://face-service:8082}
     volumes:
       - ./storage/events:/data/events
       - ./config/frigate:/config:ro
