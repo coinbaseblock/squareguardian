@@ -29,6 +29,9 @@ func main() {
 		cfg.BufferGB,
 		cfg.SaveIntervalS,
 		cfg.FaceServiceURL,
+		cfg.SnapshotBurstCount,
+		cfg.SnapshotBurstIntervalMS,
+		cfg.AlertCooldownSec,
 	)
 	det.Start()
 	defer det.Stop()

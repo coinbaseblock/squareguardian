@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 )
@@ -121,42 +120,7 @@ func fetchSnapshot(frigateURL, eventID string) ([]byte, error) {
 	return data, nil
 }
 
-// identifyNewEvent attempts to identify a person in a newly detected event.
-// It fetches the snapshot from Frigate, sends it to face-service, and returns
-// auto-annotation fields if a match is found.
-func (d *Detector) identifyNewEvent(ev *Event) {
-	if d.faceClient == nil || ev.Label != "person" || ev.Snapshot == "" {
-		return
-	}
+// identifyNewEvent is kept for backward compatibility but delegates to
+// the Detector's identifyPersonEvent method which uses burst snapshots
+// and alert cooldown. Callers should use identifyPersonEvent directly.
 
-	snapshot, err := fetchSnapshot(d.frigateURL, ev.ID)
-	if err != nil {
-		log.Printf("detector: face-id: fetch snapshot for %s: %v", ev.ID, err)
-		return
-	}
-
-	result, err := d.faceClient.Identify(snapshot, ev.ID)
-	if err != nil {
-		log.Printf("detector: face-id: identify %s: %v", ev.ID, err)
-		return
-	}
-
-	if len(result.Matches) == 0 {
-		if result.HasUnknown {
-			ev.Identity = "คนภายนอก"
-			ev.Note = "auto: ตรวจพบคนภายนอก (ไม่ตรงกับบุคคลที่ลงทะเบียน)"
-			log.Printf("detector: face-id: %s → unknown person", ev.ID)
-		}
-		return
-	}
-
-	best := result.Matches[0]
-	if best.Status == "match" {
-		ev.Identity = best.Name
-		ev.Note = fmt.Sprintf("auto: ระบุตัวตน %s (%.0f%%)", best.Name, best.Similarity*100)
-		log.Printf("detector: face-id: %s → %s (%.2f)", ev.ID, best.Name, best.Similarity)
-	} else if best.Status == "suggest" {
-		ev.Note = fmt.Sprintf("auto: อาจเป็น %s (%.0f%%)", best.Name, best.Similarity*100)
-		log.Printf("detector: face-id: %s → suggest %s (%.2f)", ev.ID, best.Name, best.Similarity)
-	}
-}
