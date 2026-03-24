@@ -48,8 +48,9 @@ func NewFaceClient(baseURL string) *FaceClient {
 
 // IdentifyResult holds matches and unknown face info from face-service.
 type IdentifyResult struct {
-	Matches    []FaceMatch
-	HasUnknown bool
+	Matches       []FaceMatch
+	FacesDetected int
+	HasUnknown    bool
 }
 
 // Identify sends a snapshot image to the face-service and returns matches.
@@ -84,8 +85,9 @@ func (fc *FaceClient) Identify(imageData []byte, eventID string) (*IdentifyResul
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return &IdentifyResult{
-		Matches:    result.Matches,
-		HasUnknown: result.HasUnknown,
+		Matches:       result.Matches,
+		FacesDetected: result.FacesDetected,
+		HasUnknown:    result.HasUnknown,
 	}, nil
 }
 
@@ -100,9 +102,11 @@ func (fc *FaceClient) IsAvailable() bool {
 }
 
 // fetchSnapshot downloads the snapshot image for an event from Frigate.
+// It requests a cropped version focused on the detected object for better
+// face detection accuracy.
 func fetchSnapshot(frigateURL, eventID string) ([]byte, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	url := fmt.Sprintf("%s/api/events/%s/snapshot.jpg", frigateURL, eventID)
+	url := fmt.Sprintf("%s/api/events/%s/snapshot.jpg?crop=1&h=720&quality=95", frigateURL, eventID)
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("fetch snapshot: %w", err)
