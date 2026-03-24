@@ -33,6 +33,7 @@ type identifyRequest struct {
 type identifyResponse struct {
 	Matches       []FaceMatch `json:"matches"`
 	FacesDetected int         `json:"faces_detected"`
+	HasUnknown    bool        `json:"has_unknown"`
 }
 
 // NewFaceClient creates a client for the face-service.
@@ -46,8 +47,14 @@ func NewFaceClient(baseURL string) *FaceClient {
 	}
 }
 
+// IdentifyResult holds matches and unknown face info from face-service.
+type IdentifyResult struct {
+	Matches    []FaceMatch
+	HasUnknown bool
+}
+
 // Identify sends a snapshot image to the face-service and returns matches.
-func (fc *FaceClient) Identify(imageData []byte, eventID string) ([]FaceMatch, error) {
+func (fc *FaceClient) Identify(imageData []byte, eventID string) (*IdentifyResult, error) {
 	b64 := base64.StdEncoding.EncodeToString(imageData)
 
 	body, err := json.Marshal(identifyRequest{
@@ -77,7 +84,10 @@ func (fc *FaceClient) Identify(imageData []byte, eventID string) ([]FaceMatch, e
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
-	return result.Matches, nil
+	return &IdentifyResult{
+		Matches:    result.Matches,
+		HasUnknown: result.HasUnknown,
+	}, nil
 }
 
 // IsAvailable checks if the face-service is reachable.
@@ -125,17 +135,22 @@ func (d *Detector) identifyNewEvent(ev *Event) {
 		return
 	}
 
-	matches, err := d.faceClient.Identify(snapshot, ev.ID)
+	result, err := d.faceClient.Identify(snapshot, ev.ID)
 	if err != nil {
 		log.Printf("detector: face-id: identify %s: %v", ev.ID, err)
 		return
 	}
 
-	if len(matches) == 0 {
+	if len(result.Matches) == 0 {
+		if result.HasUnknown {
+			ev.Identity = "คนภายนอก"
+			ev.Note = "auto: ตรวจพบคนภายนอก (ไม่ตรงกับบุคคลที่ลงทะเบียน)"
+			log.Printf("detector: face-id: %s → unknown person", ev.ID)
+		}
 		return
 	}
 
-	best := matches[0]
+	best := result.Matches[0]
 	if best.Status == "match" {
 		ev.Identity = best.Name
 		ev.Note = fmt.Sprintf("auto: ระบุตัวตน %s (%.0f%%)", best.Name, best.Similarity*100)

@@ -120,6 +120,20 @@ def delete_person(person_id: str) -> bool:
     return deleted
 
 
+def delete_auto_embeddings(person_id: str) -> int:
+    """Delete all auto-learned embeddings for a person, keeping manual ones."""
+    conn = _connect()
+    cur = conn.execute(
+        "DELETE FROM face_embeddings WHERE person_id = ? AND source = 'auto'",
+        (person_id,),
+    )
+    conn.execute("UPDATE persons SET updated_at = ? WHERE id = ?", (time.time(), person_id))
+    conn.commit()
+    deleted = cur.rowcount
+    conn.close()
+    return deleted
+
+
 def log_face_event(event_id: str, person_id: Optional[str], similarity: Optional[float], status: str = "auto") -> None:
     conn = _connect()
     conn.execute(
