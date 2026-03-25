@@ -182,7 +182,6 @@ foreach ($cam in $cameras) {
           input_args: preset-rtsp-restream
           roles:
             - record
-            - snapshots
         - path: rtsp://127.0.0.1:8554/cam_${cam}_sub
           input_args: preset-rtsp-restream
           roles:
@@ -195,7 +194,7 @@ foreach ($cam in $cameras) {
           input_args: preset-rtsp-restream
           roles:
             - detect
-            - snapshots
+            - record
 "@
     }
 
