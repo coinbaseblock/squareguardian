@@ -10,7 +10,7 @@ import (
 // faceProxy forwards requests to the face-service.
 func (h *Handler) faceProxy(w http.ResponseWriter, r *http.Request) {
 	if h.faceServiceURL == "" {
-		http.Error(w, `{"error":"face-service not configured"}`, http.StatusServiceUnavailable)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"detail": "face-service not configured"})
 		return
 	}
 
@@ -22,15 +22,16 @@ func (h *Handler) faceProxy(w http.ResponseWriter, r *http.Request) {
 
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, r.Body)
 	if err != nil {
-		http.Error(w, `{"error":"failed to create proxy request"}`, http.StatusInternalServerError)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": "failed to create proxy request"})
 		return
 	}
 	proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
+	proxyReq.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"face-service unavailable: %s"}`, err.Error()), http.StatusBadGateway)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"detail": fmt.Sprintf("face-service unavailable: %s", err.Error())})
 		return
 	}
 	defer resp.Body.Close()
@@ -458,8 +459,12 @@ async function registerPerson() {
         notes: document.getElementById('notes').value.trim(),
       })
     });
+    if (!resp.ok) {
+      let msg = 'Registration failed';
+      try { const data = await resp.json(); msg = data.detail || msg; } catch (_) { msg = await resp.text() || msg; }
+      throw new Error(msg);
+    }
     const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || 'Registration failed');
     showToast('Registered "' + name + '" successfully (' + data.embeddings_count + ' embeddings)', 'success');
     ['personName','firstName','lastName','carPlate','room','notes'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('faceImages').value = '';
@@ -611,8 +616,12 @@ async function registerFromCamera() {
         notes: document.getElementById('camNotes').value.trim(),
       })
     });
+    if (!resp.ok) {
+      let msg = 'Registration failed';
+      try { const data = await resp.json(); msg = data.detail || msg; } catch (_) { msg = await resp.text() || msg; }
+      throw new Error(msg);
+    }
     const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || 'Registration failed');
     showToast('Registered "' + name + '" successfully (' + data.embeddings_count + ' embeddings from ' + capturedImages.length + ' images)', 'success');
 
     // Reset
