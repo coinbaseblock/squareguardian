@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -155,23 +156,82 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 	h.timezone = loc
 	defer func() { h.timezone = origLoc }()
 
-	// Build recent events rows (last 20)
-	limit := 20
-	if len(events) < limit {
-		limit = len(events)
+	// Pagination for recent events
+	perPage := 50
+	page := 1
+	if p := r.URL.Query().Get("page"); p != "" {
+		if pv, err := strconv.Atoi(p); err == nil && pv > 0 {
+			page = pv
+		}
 	}
+	totalEvents := len(events)
+	totalPages := (totalEvents + perPage - 1) / perPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * perPage
+	end := start + perPage
+	if end > totalEvents {
+		end = totalEvents
+	}
+
 	eventRows := ""
-	for _, e := range events[:limit] {
-		eventRows += h.buildEventRow(e)
+	if totalEvents > 0 {
+		for _, e := range events[start:end] {
+			eventRows += h.buildEventRow(e)
+		}
 	}
 	if eventRows == "" {
 		eventRows = `<tr><td colspan="14" style="text-align:center;color:#888;padding:2em" data-i18n="no_events">No events yet — waiting for Frigate to detect...</td></tr>`
 	}
 
+	// Build pagination controls
+	paginationHTML := ""
+	if totalPages > 1 {
+		// Build base URL preserving existing query params
+		baseParams := ""
+		if cameraFilter != "" {
+			baseParams += "&camera=" + cameraFilter
+		}
+		if tz := r.URL.Query().Get("tz"); tz != "" {
+			baseParams += "&tz=" + tz
+		}
+
+		paginationHTML = `<div style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:16px;flex-wrap:wrap">`
+		if page > 1 {
+			paginationHTML += fmt.Sprintf(`<a href="/?page=%d%s" class="btn btn-secondary btn-sm">&laquo; Prev</a>`, page-1, baseParams)
+		}
+		// Show page numbers with ellipsis
+		for i := 1; i <= totalPages; i++ {
+			if i == 1 || i == totalPages || (i >= page-2 && i <= page+2) {
+				if i == page {
+					paginationHTML += fmt.Sprintf(`<span style="background:#3b82f6;color:#fff;padding:4px 10px;border-radius:4px;font-weight:bold">%d</span>`, i)
+				} else {
+					paginationHTML += fmt.Sprintf(`<a href="/?page=%d%s" style="padding:4px 10px;color:#93c5fd;text-decoration:none">%d</a>`, i, baseParams, i)
+				}
+			} else if i == page-3 || i == page+3 {
+				paginationHTML += `<span style="color:#6b7280">...</span>`
+			}
+		}
+		if page < totalPages {
+			paginationHTML += fmt.Sprintf(`<a href="/?page=%d%s" class="btn btn-secondary btn-sm">Next &raquo;</a>`, page+1, baseParams)
+		}
+		paginationHTML += `</div>`
+	}
+
+	// Recent events heading with range info
+	eventsHeading := fmt.Sprintf("Recent Events (%d-%d of %d)", start+1, end, totalEvents)
+	if totalEvents == 0 {
+		eventsHeading = "Recent Events"
+	}
+
 	tzOpts := h.buildTimezoneOptions(loc.String())
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, dashboardTpl, tzOpts, len(events), len(labels), cameraButtons, labelRows, eventRows, h.timezoneName)
+	fmt.Fprintf(w, dashboardTpl, tzOpts, len(events), len(labels), cameraButtons, labelRows, eventsHeading, eventRows, paginationHTML, h.timezoneName)
 }
 
 func boolClass(cond bool, class string) string {
@@ -336,7 +396,7 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) identifiedEvents(w http.ResponseWriter, _ *http.Request) {
-	identified := h.det.IdentifiedEvents(10) // up to 10 events per person
+	identified := h.det.IdentifiedEvents(50) // up to 50 events per person
 	writeJSON(w, http.StatusOK, identified)
 }
 
@@ -691,7 +751,7 @@ var i18n = {
     summary_by_type: "สรุปตามประเภท",
     type_col: "ประเภท",
     event_count: "จำนวน Event",
-    recent_events: "Events ล่าสุด (20 รายการ)",
+    recent_events: "Events ล่าสุด",
     image: "ภาพ",
     time: "เวลา",
     camera: "กล้อง",
@@ -753,7 +813,7 @@ var i18n = {
     summary_by_type: "Summary by Type",
     type_col: "Type",
     event_count: "Event Count",
-    recent_events: "Recent Events (20)",
+    recent_events: "Recent Events",
     image: "Image",
     time: "Time",
     camera: "Camera",
@@ -1058,7 +1118,7 @@ var dashboardTpl = `<!DOCTYPE html>
 </div>
 
 <div class="section">
-<h2 data-i18n="recent_events">Recent Events (20)</h2>
+<h2>%s</h2>
 <table>
 <tr>
   <th data-i18n="image">Image</th><th data-i18n="time">Time</th><th data-i18n="camera">Camera</th><th data-i18n="detected">Detected</th><th>Sub-Label</th><th data-i18n="confidence">Confidence</th>
@@ -1066,6 +1126,7 @@ var dashboardTpl = `<!DOCTYPE html>
 </tr>
 %s
 </table>
+%s
 </div>
 
 ` + feedbackModalHTML + `

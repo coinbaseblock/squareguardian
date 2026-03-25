@@ -356,7 +356,7 @@ func (d *Detector) saveLoop() {
 
 func (d *Detector) poll() {
 	// Use include_thumbnails=0 for faster polling; thumbnails are fetched on demand.
-	url := fmt.Sprintf("%s/api/events?limit=50&include_thumbnails=0", d.frigateURL)
+	url := fmt.Sprintf("%s/api/events?limit=200&include_thumbnails=0", d.frigateURL)
 	resp, err := d.client.Get(url)
 	if err != nil {
 		log.Printf("detector: poll error: %v", err)
