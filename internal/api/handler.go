@@ -157,7 +157,7 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 	defer func() { h.timezone = origLoc }()
 
 	// Pagination for recent events
-	perPage := 50
+	perPage := 20
 	page := 1
 	if p := r.URL.Query().Get("page"); p != "" {
 		if pv, err := strconv.Atoi(p); err == nil && pv > 0 {
@@ -396,7 +396,7 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) identifiedEvents(w http.ResponseWriter, _ *http.Request) {
-	identified := h.det.IdentifiedEvents(50) // up to 50 events per person
+	identified := h.det.IdentifiedEvents(0) // no limit — return all events per person
 	writeJSON(w, http.StatusOK, identified)
 }
 
