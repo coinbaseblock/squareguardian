@@ -50,10 +50,24 @@ class DetectRequest(BaseModel):
 class IdentifyRequest(BaseModel):
     image: str  # base64 encoded
     event_id: str = ""  # optional frigate event id
+    camera: str = ""  # camera name for pending embedding context
 
 class RegisterRequest(BaseModel):
     name: str
     images: list[str]  # list of base64 images
+    first_name: str = ""
+    last_name: str = ""
+    car_plate: str = ""
+    room: str = ""
+    notes: str = ""
+
+class UpdatePersonRequest(BaseModel):
+    name: str = ""
+    first_name: str = ""
+    last_name: str = ""
+    car_plate: str = ""
+    room: str = ""
+    notes: str = ""
 
 class CompareRequest(BaseModel):
     image1: str
@@ -110,13 +124,32 @@ def identify(req: IdentifyRequest):
                     result["similarity"],
                     result["status"],
                 )
-                # Auto-learn: if high-confidence match, add embedding to improve accuracy
+                # Save as pending for user approval instead of auto-learning
                 if result["status"] == "match" and result["similarity"] >= 0.65:
-                    store.add_embedding(
+                    # Crop face from image and encode as base64 snapshot
+                    snapshot_b64 = ""
+                    try:
+                        bbox = face.get("bbox")
+                        if bbox:
+                            x1, y1, x2, y2 = [int(v) for v in bbox]
+                            h, w = img.shape[:2]
+                            # Add padding around face
+                            pad = int(max(x2 - x1, y2 - y1) * 0.3)
+                            x1, y1 = max(0, x1 - pad), max(0, y1 - pad)
+                            x2, y2 = min(w, x2 + pad), min(h, y2 + pad)
+                            crop = img[y1:y2, x1:x2]
+                            _, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                            snapshot_b64 = base64.b64encode(buf).decode()
+                    except Exception:
+                        pass
+                    store.add_pending_embedding(
                         result["person_id"],
                         face["embedding"],
-                        source="auto",
+                        snapshot_b64=snapshot_b64,
+                        similarity=result["similarity"],
                         quality=face["confidence"],
+                        camera=req.camera,
+                        event_id=req.event_id,
                     )
 
     return {"matches": matches, "faces_detected": len(faces), "has_unknown": len(faces) > len(matches)}
@@ -142,7 +175,14 @@ def register(req: RegisterRequest):
     if not embeddings:
         raise HTTPException(400, "no faces detected in provided images")
 
-    person_id = store.register_person(req.name.strip(), embeddings)
+    person_id = store.register_person(
+        req.name.strip(), embeddings,
+        first_name=req.first_name.strip(),
+        last_name=req.last_name.strip(),
+        car_plate=req.car_plate.strip(),
+        room=req.room.strip(),
+        notes=req.notes.strip(),
+    )
     return {
         "status": "registered",
         "person_id": person_id,
@@ -169,6 +209,36 @@ def delete_auto_embeddings(person_id: str):
     """Delete all auto-learned embeddings for a person (keep manual ones)."""
     count = store.delete_auto_embeddings(person_id)
     return {"status": "deleted", "deleted_count": count}
+
+
+@app.put("/api/face/gallery/{person_id}")
+def update_person(person_id: str, req: UpdatePersonRequest):
+    fields = {k: v.strip() for k, v in req.model_dump().items() if v.strip()}
+    if not fields:
+        raise HTTPException(400, "no fields to update")
+    if store.update_person(person_id, **fields):
+        return {"status": "updated"}
+    raise HTTPException(404, "person not found")
+
+
+@app.get("/api/face/pending")
+def get_pending(person_id: str = ""):
+    items = store.get_pending_embeddings(person_id or None)
+    return {"pending": items, "count": len(items)}
+
+
+@app.post("/api/face/pending/{pending_id}/approve")
+def approve_pending(pending_id: int):
+    if store.approve_pending_embedding(pending_id):
+        return {"status": "approved"}
+    raise HTTPException(404, "pending embedding not found")
+
+
+@app.post("/api/face/pending/{pending_id}/reject")
+def reject_pending(pending_id: int):
+    if store.reject_pending_embedding(pending_id):
+        return {"status": "rejected"}
+    raise HTTPException(404, "pending embedding not found")
 
 
 @app.post("/api/face/compare")

@@ -161,6 +161,29 @@ var facesPageTpl = `<!DOCTYPE html>
   .detection-card-camera { color: #60a5fa; }
   .detection-card-score { color: #22c55e; font-size: 0.7em; }
   .detection-badge { display: inline-block; background: #16a34a; color: white; padding: 0.15em 0.5em; border-radius: 4px; font-size: 0.75em; margin-left: 0.5em; }
+
+  /* Pending embeddings */
+  .pending-grid { display: flex; gap: 1em; flex-wrap: wrap; }
+  .pending-card { background: #252830; border-radius: 10px; overflow: hidden; width: 180px; border: 1px solid #374151; }
+  .pending-card img { width: 100%%; height: 140px; object-fit: cover; }
+  .pending-card-info { padding: 0.6em; font-size: 0.8em; }
+  .pending-card-name { font-weight: bold; color: #93c5fd; margin-bottom: 0.2em; }
+  .pending-card-meta { color: #9ca3af; font-size: 0.75em; margin-bottom: 0.4em; }
+  .pending-card .actions { justify-content: flex-start; margin-top: 0.4em; }
+
+  /* Person details */
+  .person-details { text-align: left; margin-top: 0.5em; padding-top: 0.5em; border-top: 1px solid #374151; font-size: 0.8em; }
+  .person-details .detail-row { display: flex; gap: 0.3em; margin-bottom: 0.15em; color: #9ca3af; }
+  .person-details .detail-label { color: #6b7280; min-width: 50px; }
+  .person-details .detail-value { color: #d1d5db; }
+
+  /* Edit modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 200; }
+  .modal { background: #1a1d27; border-radius: 12px; padding: 1.5em; width: 90%%; max-width: 450px; }
+  .modal h3 { margin-bottom: 1em; color: #93c5fd; }
+  .modal label { display: block; font-size: 0.85em; color: #9ca3af; margin-bottom: 0.2em; margin-top: 0.6em; }
+  .modal input { width: 100%%; padding: 0.5em; background: #252830; border: 1px solid #374151; border-radius: 6px; color: #e0e0e0; font-size: 0.9em; }
+  .modal .modal-actions { display: flex; gap: 0.5em; justify-content: flex-end; margin-top: 1.2em; }
 </style>
 </head>
 <body>
@@ -191,9 +214,35 @@ var facesPageTpl = `<!DOCTYPE html>
     <!-- Tab 1: Upload -->
     <div id="tab-upload" class="tab-content active">
       <div class="register-form">
+        <div style="display:flex; gap:1em; flex-wrap:wrap;">
+          <div style="flex:2; min-width:200px;">
+            <label for="personName">Display Name *</label>
+            <input type="text" id="personName" placeholder="e.g. John, Delivery Person">
+          </div>
+        </div>
+        <div style="display:flex; gap:1em; flex-wrap:wrap;">
+          <div style="flex:1; min-width:150px;">
+            <label for="firstName">First Name</label>
+            <input type="text" id="firstName" placeholder="First name">
+          </div>
+          <div style="flex:1; min-width:150px;">
+            <label for="lastName">Last Name</label>
+            <input type="text" id="lastName" placeholder="Last name">
+          </div>
+        </div>
+        <div style="display:flex; gap:1em; flex-wrap:wrap;">
+          <div style="flex:1; min-width:150px;">
+            <label for="carPlate">Car Plate</label>
+            <input type="text" id="carPlate" placeholder="e.g. กข 1234">
+          </div>
+          <div style="flex:1; min-width:150px;">
+            <label for="room">Room / Unit</label>
+            <input type="text" id="room" placeholder="e.g. A201, House 5">
+          </div>
+        </div>
         <div>
-          <label for="personName">Person Name</label>
-          <input type="text" id="personName" placeholder="e.g. John, Delivery Person">
+          <label for="notes">Notes</label>
+          <input type="text" id="notes" placeholder="e.g. Family member, Regular visitor">
         </div>
         <div>
           <label for="faceImages">Face Images (1-5 images)</label>
@@ -210,7 +259,7 @@ var facesPageTpl = `<!DOCTYPE html>
       <div class="register-form" style="max-width:100%%">
         <div style="display:flex; gap:1em; flex-wrap:wrap; align-items:end;">
           <div style="flex:1; min-width:200px;">
-            <label for="camPersonName">Person Name</label>
+            <label for="camPersonName">Display Name *</label>
             <input type="text" id="camPersonName" placeholder="e.g. John, Delivery Person">
           </div>
           <div style="flex:1; min-width:200px;">
@@ -219,6 +268,30 @@ var facesPageTpl = `<!DOCTYPE html>
               <option value="">-- Loading cameras --</option>
             </select>
           </div>
+        </div>
+        <div style="display:flex; gap:1em; flex-wrap:wrap;">
+          <div style="flex:1; min-width:150px;">
+            <label for="camFirstName">First Name</label>
+            <input type="text" id="camFirstName" placeholder="First name">
+          </div>
+          <div style="flex:1; min-width:150px;">
+            <label for="camLastName">Last Name</label>
+            <input type="text" id="camLastName" placeholder="Last name">
+          </div>
+        </div>
+        <div style="display:flex; gap:1em; flex-wrap:wrap;">
+          <div style="flex:1; min-width:150px;">
+            <label for="camCarPlate">Car Plate</label>
+            <input type="text" id="camCarPlate" placeholder="e.g. กข 1234">
+          </div>
+          <div style="flex:1; min-width:150px;">
+            <label for="camRoom">Room / Unit</label>
+            <input type="text" id="camRoom" placeholder="e.g. A201, House 5">
+          </div>
+        </div>
+        <div>
+          <label for="camNotes">Notes</label>
+          <input type="text" id="camNotes" placeholder="e.g. Family member, Regular visitor">
         </div>
 
         <div class="camera-area">
@@ -243,6 +316,16 @@ var facesPageTpl = `<!DOCTYPE html>
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Pending Embeddings <span id="pendingBadge" style="background:#f59e0b;color:#000;padding:0.1em 0.6em;border-radius:10px;font-size:0.7em;vertical-align:middle;display:none">0</span></h2>
+    <div class="face-note">
+      When the system detects a face matching a registered person (≥65%% confidence), it saves the embedding here for your approval. Approve to improve accuracy, or reject to discard.
+    </div>
+    <div id="pendingContainer">
+      <div class="empty-state"><p>No pending embeddings.</p></div>
     </div>
   </div>
 
@@ -319,13 +402,28 @@ async function loadGallery() {
         detInfo = '<div class="person-info" style="color:#22c55e">Detected ' + detCount + ' times</div>' +
                   '<div class="person-info" style="color:#60a5fa; font-size:0.75em">Last: ' + lastTime + '</div>';
       }
+      // Build details section
+      let details = '';
+      const detailItems = [];
+      if (p.first_name || p.last_name) detailItems.push({l:'Name', v: [p.first_name, p.last_name].filter(Boolean).join(' ')});
+      if (p.car_plate) detailItems.push({l:'Car', v: p.car_plate});
+      if (p.room) detailItems.push({l:'Room', v: p.room});
+      if (p.notes) detailItems.push({l:'Note', v: p.notes});
+      if (detailItems.length > 0) {
+        details = '<div class="person-details">' + detailItems.map(d =>
+          '<div class="detail-row"><span class="detail-label">' + d.l + '</span><span class="detail-value">' + escapeHtml(d.v) + '</span></div>'
+        ).join('') + '</div>';
+      }
+      const pJson = escapeHtml(JSON.stringify({id:p.id,name:p.name||'',first_name:p.first_name||'',last_name:p.last_name||'',car_plate:p.car_plate||'',room:p.room||'',notes:p.notes||''}));
       return '<div class="person-card">' +
         '<div class="person-avatar">' + initials(p.name) + '</div>' +
         '<div class="person-name">' + escapeHtml(p.name) + '</div>' +
         '<div class="person-info">' + p.face_count + ' embeddings</div>' +
         '<div class="person-info">Source: ' + escapeHtml(p.source) + '</div>' +
         detInfo +
+        details +
         '<div class="actions">' +
+          '<button class="btn btn-secondary btn-sm" onclick=\'editPerson(' + pJson + ')\'>Edit</button>' +
           '<button class="btn btn-danger btn-sm" onclick="deletePerson(\'' + p.id + '\',\'' + escapeHtml(p.name) + '\')">Delete</button>' +
         '</div>' +
       '</div>';
@@ -351,12 +449,19 @@ async function registerPerson() {
     const resp = await fetch('/api/face/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, images })
+      body: JSON.stringify({
+        name, images,
+        first_name: document.getElementById('firstName').value.trim(),
+        last_name: document.getElementById('lastName').value.trim(),
+        car_plate: document.getElementById('carPlate').value.trim(),
+        room: document.getElementById('room').value.trim(),
+        notes: document.getElementById('notes').value.trim(),
+      })
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || 'Registration failed');
     showToast('Registered "' + name + '" successfully (' + data.embeddings_count + ' embeddings)', 'success');
-    document.getElementById('personName').value = '';
+    ['personName','firstName','lastName','carPlate','room','notes'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('faceImages').value = '';
     loadGallery();
   } catch (e) {
@@ -497,14 +602,21 @@ async function registerFromCamera() {
     const resp = await fetch('/api/face/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, images: capturedImages })
+      body: JSON.stringify({
+        name, images: capturedImages,
+        first_name: document.getElementById('camFirstName').value.trim(),
+        last_name: document.getElementById('camLastName').value.trim(),
+        car_plate: document.getElementById('camCarPlate').value.trim(),
+        room: document.getElementById('camRoom').value.trim(),
+        notes: document.getElementById('camNotes').value.trim(),
+      })
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || 'Registration failed');
     showToast('Registered "' + name + '" successfully (' + data.embeddings_count + ' embeddings from ' + capturedImages.length + ' images)', 'success');
 
     // Reset
-    document.getElementById('camPersonName').value = '';
+    ['camPersonName','camFirstName','camLastName','camCarPlate','camRoom','camNotes'].forEach(id => document.getElementById(id).value = '');
     capturedImages = [];
     currentPoseIdx = 0;
     renderPoseGuide();
@@ -517,6 +629,106 @@ async function registerFromCamera() {
     showToast('Error: ' + e.message, 'error');
     document.getElementById('camRegisterBtn').disabled = false;
   }
+}
+
+// --- Pending Embeddings ---
+async function loadPending() {
+  const container = document.getElementById('pendingContainer');
+  const badge = document.getElementById('pendingBadge');
+  try {
+    const resp = await fetch('/api/face/pending');
+    if (!resp.ok) throw new Error('Failed to load');
+    const data = await resp.json();
+    if (!data.pending || data.pending.length === 0) {
+      container.innerHTML = '<div class="empty-state"><p>No pending embeddings. The system will add entries here when it detects registered persons.</p></div>';
+      badge.style.display = 'none';
+      return;
+    }
+    badge.textContent = data.pending.length;
+    badge.style.display = 'inline';
+    container.innerHTML = '<div class="pending-grid">' + data.pending.map(p => {
+      const imgSrc = p.snapshot ? 'data:image/jpeg;base64,' + p.snapshot : '';
+      const sim = p.similarity ? (p.similarity * 100).toFixed(0) + '%%' : '';
+      const ago = timeAgo(p.created_at);
+      return '<div class="pending-card">' +
+        (imgSrc ? '<img src="' + imgSrc + '" alt="pending">' : '<div style="width:100%%;height:140px;background:#374151;display:flex;align-items:center;justify-content:center;color:#6b7280">No preview</div>') +
+        '<div class="pending-card-info">' +
+          '<div class="pending-card-name">' + escapeHtml(p.person_name) + '</div>' +
+          '<div class="pending-card-meta">' + (sim ? 'Similarity: ' + sim + '<br>' : '') + (p.camera ? 'Camera: ' + escapeHtml(p.camera) + '<br>' : '') + ago + '</div>' +
+          '<div class="actions">' +
+            '<button class="btn btn-success btn-sm" onclick="approvePending(' + p.id + ')">Approve</button>' +
+            '<button class="btn btn-danger btn-sm" onclick="rejectPending(' + p.id + ')">Reject</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('') + '</div>';
+  } catch (e) {
+    container.innerHTML = '<div class="empty-state"><p>Failed to load pending embeddings.</p></div>';
+    badge.style.display = 'none';
+  }
+}
+
+async function approvePending(id) {
+  try {
+    const resp = await fetch('/api/face/pending/' + id + '/approve', { method: 'POST' });
+    if (!resp.ok) throw new Error('Approve failed');
+    showToast('Embedding approved and added', 'success');
+    loadPending();
+    loadGallery();
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function rejectPending(id) {
+  try {
+    const resp = await fetch('/api/face/pending/' + id + '/reject', { method: 'POST' });
+    if (!resp.ok) throw new Error('Reject failed');
+    showToast('Embedding rejected', 'success');
+    loadPending();
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// --- Edit Person Modal ---
+function editPerson(p) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = '<div class="modal">' +
+    '<h3>Edit Person: ' + escapeHtml(p.name) + '</h3>' +
+    '<label>Display Name</label><input id="editName" value="' + escapeHtml(p.name) + '">' +
+    '<label>First Name</label><input id="editFirstName" value="' + escapeHtml(p.first_name) + '">' +
+    '<label>Last Name</label><input id="editLastName" value="' + escapeHtml(p.last_name) + '">' +
+    '<label>Car Plate</label><input id="editCarPlate" value="' + escapeHtml(p.car_plate) + '">' +
+    '<label>Room / Unit</label><input id="editRoom" value="' + escapeHtml(p.room) + '">' +
+    '<label>Notes</label><input id="editNotes" value="' + escapeHtml(p.notes) + '">' +
+    '<div class="modal-actions">' +
+      '<button class="btn btn-secondary" onclick="this.closest(\'.modal-overlay\').remove()">Cancel</button>' +
+      '<button class="btn btn-primary" onclick="savePersonEdit(\'' + p.id + '\')">Save</button>' +
+    '</div>' +
+  '</div>';
+  document.body.appendChild(overlay);
+}
+
+async function savePersonEdit(personId) {
+  const fields = {
+    name: document.getElementById('editName').value.trim(),
+    first_name: document.getElementById('editFirstName').value.trim(),
+    last_name: document.getElementById('editLastName').value.trim(),
+    car_plate: document.getElementById('editCarPlate').value.trim(),
+    room: document.getElementById('editRoom').value.trim(),
+    notes: document.getElementById('editNotes').value.trim(),
+  };
+  if (!fields.name) { showToast('Display name is required', 'error'); return; }
+  try {
+    const resp = await fetch('/api/face/gallery/' + personId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
+    });
+    if (!resp.ok) { const d = await resp.json(); throw new Error(d.detail || 'Update failed'); }
+    showToast('Person updated', 'success');
+    document.querySelector('.modal-overlay').remove();
+    loadGallery();
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
 }
 
 // --- Utilities ---
@@ -624,11 +836,13 @@ function timeAgo(timestamp) {
 
 // Init
 loadGallery();
+loadPending();
 loadDetectionHistory();
 renderPoseGuide();
 
-// Auto-refresh detection history every 30 seconds
+// Auto-refresh every 30 seconds
 setInterval(loadDetectionHistory, 30000);
+setInterval(loadPending, 30000);
 </script>
 ` + i18nScript + `
 </body>

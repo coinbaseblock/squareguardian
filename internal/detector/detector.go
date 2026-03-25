@@ -604,7 +604,7 @@ func (d *Detector) identifyPersonEvent(ev *Event) {
 			ev.ID, activeBest.sharpness)
 	}
 
-	result, err := d.faceClient.Identify(snapshot, ev.ID)
+	result, err := d.faceClient.Identify(snapshot, ev.ID, ev.Camera)
 	if err != nil {
 		log.Printf("detector: face-id: identify %s: %v", ev.ID, err)
 		return
