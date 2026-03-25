@@ -356,24 +356,53 @@ func (d *Detector) saveLoop() {
 
 func (d *Detector) poll() {
 	// Use include_thumbnails=0 for faster polling; thumbnails are fetched on demand.
-	url := fmt.Sprintf("%s/api/events?limit=50&include_thumbnails=0", d.frigateURL)
-	resp, err := d.client.Get(url)
-	if err != nil {
-		log.Printf("detector: poll error: %v", err)
-		return
-	}
-	defer resp.Body.Close()
+	// Paginate through Frigate API to fetch all available events.
+	var allRaw []FrigateEvent
+	pageSize := 100
+	before := ""
+	maxPages := 20 // safety limit to avoid infinite loops
 
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("detector: frigate returned status %d", resp.StatusCode)
-		return
+	for page := 0; page < maxPages; page++ {
+		url := fmt.Sprintf("%s/api/events?limit=%d&include_thumbnails=0", d.frigateURL, pageSize)
+		if before != "" {
+			url += "&before=" + before
+		}
+		resp, err := d.client.Get(url)
+		if err != nil {
+			log.Printf("detector: poll error: %v", err)
+			return
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			log.Printf("detector: frigate returned status %d", resp.StatusCode)
+			return
+		}
+
+		var raw []FrigateEvent
+		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+			resp.Body.Close()
+			log.Printf("detector: decode error: %v", err)
+			return
+		}
+		resp.Body.Close()
+
+		if len(raw) == 0 {
+			break
+		}
+		allRaw = append(allRaw, raw...)
+
+		// If we got fewer than pageSize, we've reached the end
+		if len(raw) < pageSize {
+			break
+		}
+
+		// Use the last event's start_time as the "before" cursor for next page
+		last := raw[len(raw)-1]
+		before = fmt.Sprintf("%f", last.StartTime)
 	}
 
-	var raw []FrigateEvent
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		log.Printf("detector: decode error: %v", err)
-		return
-	}
+	raw := allRaw
 
 	d.mu.Lock()
 
