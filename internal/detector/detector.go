@@ -616,11 +616,11 @@ func (d *Detector) identifyPersonEvent(ev *Event) {
 		// Mark as unknown outsider if faces were detected but none matched,
 		// OR if no faces were detected at all (person too far / facing away).
 		if result.HasUnknown || result.FacesDetected == 0 {
-			ev.Identity = "คนภายนอก"
+			ev.Identity = "outsider"
 			if result.FacesDetected > 0 {
-				ev.Note = "auto: ตรวจพบคนภายนอก (ไม่ตรงกับบุคคลที่ลงทะเบียน)"
+				ev.Note = "auto: unknown person detected (no match with registered persons)"
 			} else {
-				ev.Note = "auto: ตรวจพบบุคคล (ไม่สามารถตรวจจับใบหน้าได้)"
+				ev.Note = "auto: person detected (unable to detect face)"
 			}
 			log.Printf("detector: face-id: %s → unknown person (faces_detected=%d)", ev.ID, result.FacesDetected)
 			identified = true
@@ -630,12 +630,12 @@ func (d *Detector) identifyPersonEvent(ev *Event) {
 		best := result.Matches[0]
 		if best.Status == "match" {
 			ev.Identity = best.Name
-			ev.Note = fmt.Sprintf("auto: ระบุตัวตน %s (%.0f%%)", best.Name, best.Similarity*100)
+			ev.Note = fmt.Sprintf("auto: identified %s (%.0f%%)", best.Name, best.Similarity*100)
 			log.Printf("detector: face-id: %s → %s (%.2f)", ev.ID, best.Name, best.Similarity)
 			identified = true
 			cooldownKey = ev.Camera + ":" + best.Name
 		} else if best.Status == "suggest" {
-			ev.Note = fmt.Sprintf("auto: อาจเป็น %s (%.0f%%)", best.Name, best.Similarity*100)
+			ev.Note = fmt.Sprintf("auto: possibly %s (%.0f%%)", best.Name, best.Similarity*100)
 			log.Printf("detector: face-id: %s → suggest %s (%.2f)", ev.ID, best.Name, best.Similarity)
 		}
 	}

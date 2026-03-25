@@ -131,7 +131,7 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build camera filter buttons
-	cameraButtons := fmt.Sprintf(`<a href="/" class="cam-btn%s" data-i18n="all_cameras">ทั้งหมด</a>`, boolClass(cameraFilter == "", " active"))
+	cameraButtons := fmt.Sprintf(`<a href="/" class="cam-btn%s" data-i18n="all_cameras">All</a>`, boolClass(cameraFilter == "", " active"))
 	for _, cam := range cameras {
 		cameraButtons += fmt.Sprintf(`<a href="/?camera=%s" class="cam-btn%s">%s</a>`,
 			cam, boolClass(cameraFilter == cam, " active"), cam)
@@ -165,7 +165,7 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 		eventRows += h.buildEventRow(e)
 	}
 	if eventRows == "" {
-		eventRows = `<tr><td colspan="14" style="text-align:center;color:#888;padding:2em" data-i18n="no_events">ยังไม่มี event — รอ Frigate ตรวจจับ...</td></tr>`
+		eventRows = `<tr><td colspan="14" style="text-align:center;color:#888;padding:2em" data-i18n="no_events">No events yet — waiting for Frigate to detect...</td></tr>`
 	}
 
 	tzOpts := h.buildTimezoneOptions(loc.String())
@@ -271,7 +271,7 @@ func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
 
 		moreIndicator := ""
 		if len(evts) > showLimit {
-			moreIndicator = fmt.Sprintf(`<div class="more-indicator">+%d รายการ</div>`, len(evts)-showLimit)
+			moreIndicator = fmt.Sprintf(`<div class="more-indicator">+%d more</div>`, len(evts)-showLimit)
 		}
 
 		sections += fmt.Sprintf(`<div class="ev-section">
@@ -281,14 +281,14 @@ func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if sections == "" {
-		sections = `<div style="text-align:center;color:#888;padding:3em">ยังไม่มี event — รอ Frigate ตรวจจับ...</div>`
+		sections = `<div style="text-align:center;color:#888;padding:3em">No events yet — waiting for Frigate to detect...</div>`
 	}
 
 	// Build existing groups summary
 	groupsSummary := ""
 	if len(groups) > 0 {
 		groupsSummary = `<div class="ev-section" style="border-top:1px solid #333;padding-top:1em;margin-top:1em">
-			<h2>กลุ่มที่สร้างแล้ว <span class="ev-count">` + fmt.Sprintf("%d", len(groups)) + ` Groups</span></h2>`
+			<h2>Created Groups <span class="ev-count">` + fmt.Sprintf("%d", len(groups)) + ` Groups</span></h2>`
 		for _, g := range groups {
 			// Find event thumbnails for this group
 			thumbPreviews := ""
@@ -307,10 +307,10 @@ func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
 			}
 			groupsSummary += fmt.Sprintf(`<div class="group-row">
 				<div class="group-info">
-					<strong>%s</strong> <span style="color:#888">(%s · %d ภาพ)</span>
+					<strong>%s</strong> <span style="color:#888">(%s · %d images)</span>
 				</div>
 				<div class="group-thumbs">%s</div>
-				<button class="btn-delete-group" onclick="deleteGroup('%s')">ลบกลุ่ม</button>
+				<button class="btn-delete-group" onclick="deleteGroup('%s')">Delete Group</button>
 			</div>`, g.Name, labelDisplayName(g.Label), len(g.EventIDs), thumbPreviews, g.ID)
 		}
 		groupsSummary += `</div>`
@@ -660,14 +660,14 @@ func escapeJS(s string) string {
 
 func labelDisplayName(label string) string {
 	names := map[string]string{
-		"person":     "Person (บุคคล)",
-		"car":        "Car (รถยนต์)",
-		"motorcycle": "Motorcycle (จักรยานยนต์)",
-		"bus":        "Bus (รถบัส)",
-		"truck":      "Truck (รถบรรทุก)",
-		"backpack":   "Backpack (กระเป๋าเป้)",
-		"suitcase":   "Suitcase (กระเป๋าเดินทาง)",
-		"handbag":    "Handbag (กระเป๋าถือ)",
+		"person":     "Person",
+		"car":        "Car",
+		"motorcycle": "Motorcycle",
+		"bus":        "Bus",
+		"truck":      "Truck",
+		"backpack":   "Backpack",
+		"suitcase":   "Suitcase",
+		"handbag":    "Handbag",
 	}
 	if n, ok := names[label]; ok {
 		return n
@@ -806,7 +806,7 @@ var i18n = {
 };
 
 function getLang() {
-  return localStorage.getItem('sg_lang') || 'th';
+  return localStorage.getItem('sg_lang') || 'en';
 }
 
 function setLang(lang) {
@@ -816,18 +816,18 @@ function setLang(lang) {
 
 function applyLang() {
   var lang = getLang();
-  var t = i18n[lang] || i18n.th;
+  var t = i18n[lang] || i18n.en;
   document.querySelectorAll('[data-i18n]').forEach(function(el) {
     var key = el.getAttribute('data-i18n');
     if (t[key]) el.textContent = t[key];
   });
   // Update lang toggle button
   var btn = document.getElementById('langToggle');
-  if (btn) btn.textContent = lang === 'th' ? 'EN' : 'TH';
+  if (btn) btn.textContent = lang === 'en' ? 'TH' : 'EN';
 }
 
 function toggleLang() {
-  setLang(getLang() === 'th' ? 'en' : 'th');
+  setLang(getLang() === 'en' ? 'th' : 'en');
 }
 
 document.addEventListener('DOMContentLoaded', applyLang);
@@ -838,7 +838,7 @@ func timeAgo(startTime float64) string {
 	d := time.Since(time.Unix(int64(startTime), 0))
 	switch {
 	case d < time.Minute:
-		return "เมื่อสักครู่"
+		return "just now"
 	case d < time.Hour:
 		return fmt.Sprintf("%dm ago", int(d.Minutes()))
 	case d < 24*time.Hour:
@@ -853,49 +853,49 @@ const feedbackModalHTML = `
 <!-- Feedback Modal -->
 <div class="modal-bg" id="feedbackModal">
 <div class="modal">
-  <h3>ระบุข้อมูลเพิ่มเติม</h3>
+  <h3>Additional Information</h3>
   <input type="hidden" id="fb-event-id">
   <p style="color:#888;font-size:.85em">Event: <span id="fb-label" style="color:#4fc3f7"></span></p>
 
   <div class="form-row">
     <div class="form-col">
-      <label>ระบุตัวตน (ชื่อคน)</label>
-      <input type="text" id="fb-identity" placeholder="เช่น สมชาย, คนส่งของ">
+      <label>Identity (Person Name)</label>
+      <input type="text" id="fb-identity" placeholder="e.g. John, Delivery Person">
     </div>
     <div class="form-col">
-      <label>เลขห้อง / Unit</label>
-      <input type="text" id="fb-room" placeholder="เช่น A0213, B1502">
+      <label>Room / Unit</label>
+      <input type="text" id="fb-room" placeholder="e.g. A0213, B1502">
     </div>
   </div>
 
   <div class="form-row">
     <div class="form-col">
-      <label>ทะเบียนรถ</label>
-      <input type="text" id="fb-plate" placeholder="เช่น ทร 3474, สวย 123">
+      <label>License Plate</label>
+      <input type="text" id="fb-plate" placeholder="e.g. ABC 1234">
     </div>
     <div class="form-col">
-      <label>จังหวัด (ถ้ามี)</label>
-      <input type="text" id="fb-province" placeholder="เช่น กรุงเทพ, นนทบุรี">
+      <label>Province (if applicable)</label>
+      <input type="text" id="fb-province" placeholder="e.g. Bangkok">
     </div>
   </div>
 
   <div class="form-row">
     <div class="form-col">
-      <label>ยี่ห้อ / รุ่น</label>
-      <input type="text" id="fb-brand" placeholder="เช่น Toyota Camry, Honda Civic">
+      <label>Brand / Model</label>
+      <input type="text" id="fb-brand" placeholder="e.g. Toyota Camry, Honda Civic">
     </div>
     <div class="form-col">
-      <label>สีรถ</label>
-      <input type="text" id="fb-color" placeholder="เช่น สีขาว, สีดำ, สีแดง">
+      <label>Vehicle Color</label>
+      <input type="text" id="fb-color" placeholder="e.g. White, Black, Red">
     </div>
   </div>
 
-  <label>หมายเหตุ / Feedback</label>
-  <textarea id="fb-note" placeholder="เช่น ตรวจจับถูกต้อง, เป็นคนส่งของ, รถของห้อง A0213"></textarea>
+  <label>Notes / Feedback</label>
+  <textarea id="fb-note" placeholder="e.g. Correct detection, delivery person, vehicle from unit A0213"></textarea>
 
   <div class="actions">
-    <button class="btn-cancel" onclick="closeFeedback()">ยกเลิก</button>
-    <button class="btn-save" onclick="saveFeedback()">บันทึก</button>
+    <button class="btn-cancel" onclick="closeFeedback()">Cancel</button>
+    <button class="btn-save" onclick="saveFeedback()">Save</button>
   </div>
   <div class="msg" id="fb-msg"></div>
 </div>
@@ -940,7 +940,7 @@ function saveFeedback() {
   .then(function(r) { return r.json(); })
   .then(function(data) {
     if (data.status === 'ok') {
-      document.getElementById('fb-msg').textContent = 'บันทึกสำเร็จ!';
+      document.getElementById('fb-msg').textContent = 'Saved successfully!';
       setTimeout(function() { closeFeedback(); location.reload(); }, 800);
     } else {
       document.getElementById('fb-msg').style.color = '#f44336';
@@ -1009,7 +1009,7 @@ a{color:#4fc3f7;text-decoration:none}
 `
 
 var dashboardTpl = `<!DOCTYPE html>
-<html lang="th">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1027,42 +1027,42 @@ var dashboardTpl = `<!DOCTYPE html>
 <div class="top-bar">
   <h1>SquareGuardian Dashboard</h1>
   <div class="top-controls">
-    <span style="color:#888;font-size:.8em" data-i18n="timezone">เขตเวลา</span>
+    <span style="color:#888;font-size:.8em" data-i18n="timezone">Timezone</span>
     <select class="tz-select" id="tzSelect" onchange="setTimezone(this.value)">%s</select>
-    <button class="lang-btn" id="langToggle" onclick="toggleLang()">EN</button>
+    <button class="lang-btn" id="langToggle" onclick="toggleLang()">TH</button>
   </div>
 </div>
 <div class="nav">
   <a href="/" class="active" data-i18n="dashboard">Dashboard</a>
-  <a href="/events" data-i18n="events_by_type">Events (แยกประเภท)</a>
+  <a href="/events" data-i18n="events_by_type">Events by Type</a>
   <a href="/faces" data-i18n="face_gallery">Face Gallery</a>
 </div>
 
 <div class="cards">
-  <div class="card"><div class="num">%d</div><div class="lbl" data-i18n="all_events">Events ทั้งหมด</div></div>
-  <div class="card"><div class="num">%d</div><div class="lbl" data-i18n="tracked_types">ประเภทที่ติดตาม</div></div>
-  <div class="card"><div class="num"><span class="status ok">ONLINE</span></div><div class="lbl" data-i18n="system_status">สถานะระบบ</div></div>
+  <div class="card"><div class="num">%d</div><div class="lbl" data-i18n="all_events">All Events</div></div>
+  <div class="card"><div class="num">%d</div><div class="lbl" data-i18n="tracked_types">Tracked Types</div></div>
+  <div class="card"><div class="num"><span class="status ok">ONLINE</span></div><div class="lbl" data-i18n="system_status">System Status</div></div>
 </div>
 
 <div class="section">
-<h2 data-i18n="filter_by_camera">กรองตามกล้อง</h2>
+<h2 data-i18n="filter_by_camera">Filter by Camera</h2>
 <div class="cam-filter">%s</div>
 </div>
 
 <div class="section">
-<h2 data-i18n="summary_by_type">สรุปตามประเภท</h2>
+<h2 data-i18n="summary_by_type">Summary by Type</h2>
 <table>
-<tr><th data-i18n="type_col">ประเภท</th><th style="text-align:right" data-i18n="event_count">จำนวน Event</th></tr>
+<tr><th data-i18n="type_col">Type</th><th style="text-align:right" data-i18n="event_count">Event Count</th></tr>
 %s
 </table>
 </div>
 
 <div class="section">
-<h2 data-i18n="recent_events">Events ล่าสุด (20 รายการ)</h2>
+<h2 data-i18n="recent_events">Recent Events (20)</h2>
 <table>
 <tr>
-  <th data-i18n="image">ภาพ</th><th data-i18n="time">เวลา</th><th data-i18n="camera">กล้อง</th><th data-i18n="detected">ตรวจพบ</th><th>Sub-Label</th><th data-i18n="confidence">ความมั่นใจ</th>
-  <th data-i18n="zone">โซน</th><th data-i18n="identity">ระบุตัวตน</th><th data-i18n="room">ห้อง</th><th data-i18n="license_plate">ทะเบียน</th><th data-i18n="brand_color">ยี่ห้อ/สี</th><th data-i18n="notes">หมายเหตุ</th><th></th>
+  <th data-i18n="image">Image</th><th data-i18n="time">Time</th><th data-i18n="camera">Camera</th><th data-i18n="detected">Detected</th><th>Sub-Label</th><th data-i18n="confidence">Confidence</th>
+  <th data-i18n="zone">Zone</th><th data-i18n="identity">Identity</th><th data-i18n="room">Room</th><th data-i18n="license_plate">License Plate</th><th data-i18n="brand_color">Brand/Color</th><th data-i18n="notes">Notes</th><th></th>
 </tr>
 %s
 </table>
@@ -1075,7 +1075,7 @@ var dashboardTpl = `<!DOCTYPE html>
   <a href="/api/status">API: Status</a>
   <a href="/healthz">Health Check</a>
 </div>
-<p style="margin-top:1em;color:#666;font-size:.8em"><span data-i18n="auto_refresh">Auto-refresh ทุก 10 วินาที</span> | Storage: max 256 GB</p>
+<p style="margin-top:1em;color:#666;font-size:.8em"><span data-i18n="auto_refresh">Auto-refresh every 10 seconds</span> | Storage: max 256 GB</p>
 
 ` + feedbackScript + `
 ` + i18nScript + `
@@ -1098,7 +1098,7 @@ function setTimezone(tz) {
 </html>`
 
 var eventsPageTpl = `<!DOCTYPE html>
-<html lang="th">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1172,19 +1172,19 @@ body.select-mode .ident-badge{left:28px}
 <div class="top-bar">
   <h1>SquareGuardian — Events</h1>
   <div class="top-controls">
-    <span style="color:#888;font-size:.8em" data-i18n="timezone">เขตเวลา</span>
+    <span style="color:#888;font-size:.8em" data-i18n="timezone">Timezone</span>
     <select class="tz-select" id="tzSelect" onchange="setTimezone(this.value)">%s</select>
-    <button class="lang-btn" id="langToggle" onclick="toggleLang()">EN</button>
+    <button class="lang-btn" id="langToggle" onclick="toggleLang()">TH</button>
   </div>
 </div>
 <div class="nav">
   <a href="/" data-i18n="dashboard">Dashboard</a>
-  <a href="/events" class="active" data-i18n="events_by_type">Events (แยกประเภท)</a>
+  <a href="/events" class="active" data-i18n="events_by_type">Events by Type</a>
   <a href="/faces" data-i18n="face_gallery">Face Gallery</a>
-  <button class="select-toggle" id="selectToggle" onclick="toggleSelectMode()" data-i18n="select_multiple">เลือกหลายรายการ</button>
+  <button class="select-toggle" id="selectToggle" onclick="toggleSelectMode()" data-i18n="select_multiple">Select Multiple</button>
 </div>
 
-<p style="color:#888;font-size:.85em;margin-bottom:1em" data-i18n="click_to_identify">คลิกที่รูปเพื่อระบุตัวตน, ห้อง, ทะเบียนรถ, ยี่ห้อ/สี — กด "เลือกหลายรายการ" เพื่อเลือกหลายรูปแล้วจัดกลุ่มเป็นคน/รถ คันเดียวกัน</p>
+<p style="color:#888;font-size:.85em;margin-bottom:1em" data-i18n="click_to_identify">Click an image to identify, add room, license plate, brand/color — press "Select Multiple" to select multiple images and group them as the same person/vehicle</p>
 
 %s
 
