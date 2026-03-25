@@ -94,7 +94,7 @@ for cam in $CAMERAS; do
     cam_${cam}_live:
       - \"ffmpeg:cam_${cam}#video=h264\""
 
-    # Add substream if defined (for dual-stream: detect on sub, snapshots on main)
+    # Add substream if defined (for dual-stream: detect on sub, record on main)
     if [ -n "$sub_url" ]; then
         GO2RTC_STREAMS="${GO2RTC_STREAMS}
     cam_${cam}_sub:
@@ -148,25 +148,24 @@ for cam in $CAMERAS; do
 
     # Build ffmpeg inputs (dual-stream or single-stream)
     if [ -n "$sub_url" ]; then
-        # Dual-stream: main stream for snapshots (full resolution), sub for detect (lighter)
+        # Dual-stream: main stream for record (full resolution), sub for detect (lighter)
         FFMPEG_INPUTS="      inputs:
         - path: rtsp://127.0.0.1:8554/cam_${cam}
           input_args: preset-rtsp-restream
           roles:
             - record
-            - snapshots
         - path: rtsp://127.0.0.1:8554/cam_${cam}_sub
           input_args: preset-rtsp-restream
           roles:
             - detect"
     else
-        # Single stream: same stream for detect and snapshots
+        # Single stream: same stream for detect and record
         FFMPEG_INPUTS="      inputs:
         - path: rtsp://127.0.0.1:8554/cam_${cam}
           input_args: preset-rtsp-restream
           roles:
             - detect
-            - snapshots"
+            - record"
     fi
 
     CAMERAS_SECTION="${CAMERAS_SECTION}
