@@ -21,6 +21,10 @@ type snapshotCandidate struct {
 // window and returns the sharpest one. This helps avoid blurry captures when
 // a person is moving quickly through the frame.
 //
+// It fetches both cropped (focused on person) and full-frame snapshots.
+// For people at the edge of the frame, the full-frame snapshot may actually
+// provide better face detection because the crop can cut off the face.
+//
 // burstCount: number of snapshots to attempt (e.g. 3)
 // burstInterval: delay between attempts (e.g. 500ms)
 func fetchBestSnapshot(frigateURL, eventID string, burstCount int, burstInterval time.Duration) ([]byte, error) {
@@ -29,7 +33,10 @@ func fetchBestSnapshot(frigateURL, eventID string, burstCount int, burstInterval
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	url := fmt.Sprintf("%s/api/events/%s/snapshot.jpg?crop=1&h=1080&quality=95", frigateURL, eventID)
+	cropURL := fmt.Sprintf("%s/api/events/%s/snapshot.jpg?crop=1&h=1080&quality=95", frigateURL, eventID)
+	// Also fetch full-frame (uncropped) snapshot — helps when person is at
+	// the edge of the frame and the crop cuts off the face.
+	fullURL := fmt.Sprintf("%s/api/events/%s/snapshot.jpg?crop=0&h=1080&quality=95", frigateURL, eventID)
 
 	var best snapshotCandidate
 	fetched := 0
@@ -39,15 +46,25 @@ func fetchBestSnapshot(frigateURL, eventID string, burstCount int, burstInterval
 			time.Sleep(burstInterval)
 		}
 
+		// Alternate between cropped and full-frame snapshots so we have
+		// both perspectives. Cropped is better for close faces; full-frame
+		// is better for edge-of-frame faces.
+		url := cropURL
+		variant := "crop"
+		if i%3 == 2 {
+			url = fullURL
+			variant = "full"
+		}
+
 		resp, err := client.Get(url)
 		if err != nil {
-			log.Printf("detector: burst snapshot %d/%d fetch error: %v", i+1, burstCount, err)
+			log.Printf("detector: burst snapshot %d/%d (%s) fetch error: %v", i+1, burstCount, variant, err)
 			continue
 		}
 
 		data, err := readAndClose(resp)
 		if err != nil {
-			log.Printf("detector: burst snapshot %d/%d read error: %v", i+1, burstCount, err)
+			log.Printf("detector: burst snapshot %d/%d (%s) read error: %v", i+1, burstCount, variant, err)
 			continue
 		}
 

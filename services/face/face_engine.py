@@ -30,26 +30,56 @@ def _preprocess(img: np.ndarray) -> np.ndarray:
 
     Applies CLAHE (contrast-limited adaptive histogram equalization)
     to brighten dark/IR camera frames without blowing out highlights.
+    Also applies mild denoising for security camera footage which tends
+    to have compression artifacts.
     """
-    # Only apply CLAHE if image is relatively dark (mean luminance < 100)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     mean_lum = gray.mean()
-    if mean_lum < 100:
+
+    # Apply CLAHE for dark images OR low-contrast images
+    std_lum = gray.std()
+    if mean_lum < 120 or std_lum < 40:
         lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        clip_limit = 3.0 if mean_lum < 80 else 2.0
+        clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
         l = clahe.apply(l)
         img = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
-        logger.debug("CLAHE applied (mean_lum=%.0f)", mean_lum)
+        logger.debug("CLAHE applied (mean_lum=%.0f, std=%.0f)", mean_lum, std_lum)
+
+    # Light denoising to reduce JPEG/compression artifacts from security cameras.
+    # fastNlMeansDenoisingColored is effective but expensive; use small h values.
+    h, w = img.shape[:2]
+    if max(h, w) <= 1920:
+        img = cv2.fastNlMeansDenoisingColored(img, None, h=3, hForColorComponents=3,
+                                               templateWindowSize=7, searchWindowSize=21)
 
     return img
+
+
+def _add_border_padding(img: np.ndarray, pad_pct: float = 0.10) -> tuple[np.ndarray, int, int]:
+    """Add border padding around image to help detect faces near frame edges.
+
+    Wide-angle/fisheye cameras often place people at the edges where they get
+    cut off. Adding padding gives the face detector more context.
+
+    Returns (padded_image, pad_x, pad_y) so bboxes can be offset back.
+    """
+    h, w = img.shape[:2]
+    pad_x = int(w * pad_pct)
+    pad_y = int(h * pad_pct)
+    padded = cv2.copyMakeBorder(img, pad_y, pad_y, pad_x, pad_x,
+                                cv2.BORDER_REFLECT_101)
+    return padded, pad_x, pad_y
 
 
 def detect_faces(img: np.ndarray) -> list[dict]:
     """Detect faces and return bounding boxes, embeddings, and quality scores.
 
-    For high-resolution images (>1080p), runs detection at multiple scales
-    to catch both close-up and distant faces.
+    Uses multi-strategy detection:
+    1. Standard detection on preprocessed image
+    2. Padded detection for faces near frame edges (wide-angle cameras)
+    3. Upscaled detection for small/distant faces on high-res images
     """
     if _app is None:
         raise RuntimeError("Model not initialized")
@@ -58,12 +88,33 @@ def detect_faces(img: np.ndarray) -> list[dict]:
 
     h, w = img.shape[:2]
 
-    # For high-res images, try detection at original size first for distant faces,
-    # then also at scaled-down version. Merge results by NMS.
+    # Strategy 1: Standard detection
     faces = _app.get(img)
 
-    # If no faces found on high-res image and image is large, try with
-    # increased det_size temporarily for better small-face detection.
+    # Strategy 2: If no faces found, try with border padding.
+    # This helps when the face is at the very edge of the frame (common with
+    # wide-angle security cameras like Tapo). The padding gives the detector
+    # context around the face that would otherwise be clipped.
+    if not faces:
+        padded, pad_x, pad_y = _add_border_padding(img, pad_pct=0.12)
+        logger.debug("No faces at standard, retrying with border padding on %dx%d image", w, h)
+        padded_faces = _app.get(padded)
+        if padded_faces:
+            # Adjust bounding boxes back to original image coordinates
+            for face in padded_faces:
+                face.bbox[0] -= pad_x
+                face.bbox[1] -= pad_y
+                face.bbox[2] -= pad_x
+                face.bbox[3] -= pad_y
+                # Clamp to original image bounds
+                face.bbox[0] = max(0, face.bbox[0])
+                face.bbox[1] = max(0, face.bbox[1])
+                face.bbox[2] = min(w, face.bbox[2])
+                face.bbox[3] = min(h, face.bbox[3])
+            faces = padded_faces
+            logger.info("Detected %d face(s) with border padding", len(faces))
+
+    # Strategy 3: If still no faces and image is large, try larger det_size
     if not faces and max(h, w) >= 1920:
         logger.debug("No faces at default det_size, retrying with larger det_size on %dx%d image", w, h)
         _app.prepare(ctx_id=-1, det_size=(960, 960))

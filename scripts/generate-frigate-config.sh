@@ -232,9 +232,17 @@ objects:
   track:${TRACK_LIST}
   filters:
     person:
+      min_score: 0.15
+      threshold: 0.45
+      min_area: 750
+    car:
       min_score: 0.20
       threshold: 0.60
-      min_area: 1000
+      min_area: 2000
+    motorcycle:
+      min_score: 0.20
+      threshold: 0.55
+      min_area: 500
 
 detectors:
   cpu1:
@@ -242,8 +250,9 @@ detectors:
 
 motion:
   improve_contrast: true
-  contour_area: 15
-  threshold: 18
+  contour_area: 10
+  threshold: 16
+  lightning_threshold: 0.8
 
 go2rtc:
   streams:${GO2RTC_STREAMS}
