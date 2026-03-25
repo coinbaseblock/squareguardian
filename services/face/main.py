@@ -155,6 +155,30 @@ def identify(req: IdentifyRequest):
     return {"matches": matches, "faces_detected": len(faces), "has_unknown": len(faces) > len(matches)}
 
 
+@app.post("/api/face/validate-image")
+def validate_image(req: DetectRequest):
+    """Check if a face can be detected in a single image.
+
+    Used by the capture UI to give real-time feedback before registration.
+    """
+    try:
+        img = decode_image(req.image)
+    except Exception as e:
+        return {"detected": False, "reason": f"decode error: {e}"}
+    try:
+        faces = face_engine.detect_faces(img)
+    except Exception as e:
+        return {"detected": False, "reason": f"detection error: {e}"}
+    if not faces:
+        return {"detected": False, "reason": "no face found"}
+    best = max(faces, key=lambda f: f["confidence"])
+    return {
+        "detected": True,
+        "confidence": round(best["confidence"], 3),
+        "bbox": best["bbox"],
+    }
+
+
 @app.post("/api/face/register")
 def register(req: RegisterRequest):
     if not req.name.strip():
@@ -163,25 +187,34 @@ def register(req: RegisterRequest):
         raise HTTPException(400, "at least one image is required")
 
     embeddings = []
+    image_errors = []
     for i, b64 in enumerate(req.images):
         try:
             img = decode_image(b64)
         except Exception as e:
             logger.warning("Failed to decode image %d: %s", i, e)
+            image_errors.append(f"image {i+1}: decode failed")
             continue
         try:
             faces = face_engine.detect_faces(img)
         except Exception as e:
             logger.error("Face detection failed on image %d: %s", i, e)
+            image_errors.append(f"image {i+1}: detection error")
             continue
         if not faces:
+            h, w = img.shape[:2]
+            logger.warning("No faces in image %d (%dx%d)", i, w, h)
+            image_errors.append(f"image {i+1}: no face found ({w}x{h})")
             continue
         # Take the face with highest confidence
         best = max(faces, key=lambda f: f["confidence"])
         embeddings.append(best["embedding"])
 
     if not embeddings:
-        raise HTTPException(400, "no faces detected in provided images")
+        detail = "no faces detected in provided images"
+        if image_errors:
+            detail += ". Per-image: " + "; ".join(image_errors)
+        raise HTTPException(400, detail)
 
     person_id = store.register_person(
         req.name.strip(), embeddings,

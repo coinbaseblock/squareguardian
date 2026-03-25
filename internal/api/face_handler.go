@@ -566,15 +566,43 @@ async function captureShot() {
   const cam = document.getElementById('cameraSelect').value;
   if (!cam) return;
 
+  const btn = document.getElementById('captureBtn');
+  btn.disabled = true;
+  btn.textContent = 'Capturing...';
+
   try {
     const resp = await fetch('/api/camera-snapshot/' + encodeURIComponent(cam) + '?t=' + Date.now());
     if (!resp.ok) throw new Error('Failed to capture image from camera');
     const blob = await resp.blob();
     const b64 = await blobToBase64(blob);
+
+    // Validate face detection before accepting the capture
+    try {
+      const valResp = await fetch('/api/face/validate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: b64 }),
+      });
+      if (valResp.ok) {
+        const valData = await valResp.json();
+        if (!valData.detected) {
+          showToast('Warning: no face detected in capture (' + (valData.reason || 'unknown') + '). Image saved anyway — try moving closer to the camera.', 'error');
+        } else {
+          showToast('Face detected (confidence: ' + (valData.confidence * 100).toFixed(0) + '%)', 'success');
+        }
+      }
+    } catch (_) {
+      // Validation is best-effort; don't block capture if service is unavailable
+    }
+
     capturedImages.push(b64);
     advancePose();
   } catch (e) {
     showToast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Capture';
+    if (currentPoseIdx >= POSES.length) btn.disabled = true;
   }
 }
 
