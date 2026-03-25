@@ -517,7 +517,7 @@ func (d *Detector) poll() {
 func (d *Detector) captureActiveSnapshot(eventID, camera string) {
 	// Prefer cropped event snapshot (focused on the detected person).
 	var data []byte
-	cropURL := fmt.Sprintf("%s/api/events/%s/snapshot.jpg?crop=1&h=720&quality=95", d.frigateURL, eventID)
+	cropURL := fmt.Sprintf("%s/api/events/%s/snapshot.jpg?crop=1&h=1080&quality=95", d.frigateURL, eventID)
 	resp, err := d.client.Get(cropURL)
 	if err == nil {
 		buf := new(bytes.Buffer)
@@ -529,7 +529,7 @@ func (d *Detector) captureActiveSnapshot(eventID, camera string) {
 
 	// Fallback to full camera frame if cropped snapshot not available.
 	if data == nil {
-		fullURL := fmt.Sprintf("%s/api/%s/latest.jpg?h=720", d.frigateURL, camera)
+		fullURL := fmt.Sprintf("%s/api/%s/latest.jpg?h=1080", d.frigateURL, camera)
 		resp, err = d.client.Get(fullURL)
 		if err != nil {
 			return

@@ -14,8 +14,10 @@ RUN pip install --upgrade pip && \
 
 COPY . .
 
-# Pre-download model on build (cached in Docker layer)
-RUN python -c "from insightface.app import FaceAnalysis; app = FaceAnalysis(name='buffalo_s', providers=['CPUExecutionProvider']); app.prepare(ctx_id=-1, det_size=(640,640))"
+# Pre-download models on build (cached in Docker layer).
+# buffalo_l: higher accuracy for face recognition (better embeddings).
+# buffalo_s: fallback if you need lower memory usage (set FACE_MODEL_NAME=buffalo_s).
+RUN python -c "from insightface.app import FaceAnalysis; app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider']); app.prepare(ctx_id=-1, det_size=(640,640))"
 
 EXPOSE 8082
 
