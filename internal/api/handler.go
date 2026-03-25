@@ -121,9 +121,29 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 	loc := h.resolveTimezone(r)
 	cameraFilter := r.URL.Query().Get("camera")
+	identityFilter := r.URL.Query().Get("identity")
 	events := h.det.EventsFiltered("", cameraFilter)
 	labels := h.det.TrackedLabels()
 	cameras := h.det.Cameras()
+	personIdentities := h.det.PersonIdentities()
+
+	// Apply identity filter (person events only)
+	if identityFilter != "" {
+		var filtered []detector.Event
+		for _, e := range events {
+			if e.Label != "person" {
+				continue
+			}
+			ident := e.Identity
+			if ident == "" {
+				ident = "_unknown"
+			}
+			if ident == identityFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		events = filtered
+	}
 
 	// Count events by label
 	counts := make(map[string]int)
@@ -132,10 +152,29 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build camera filter buttons
-	cameraButtons := fmt.Sprintf(`<a href="/" class="cam-btn%s" data-i18n="all_cameras">All</a>`, boolClass(cameraFilter == "", " active"))
+	baseFilterParams := ""
+	if identityFilter != "" {
+		baseFilterParams += "&identity=" + identityFilter
+	}
+	cameraButtons := fmt.Sprintf(`<a href="/?%s" class="cam-btn%s" data-i18n="all_cameras">All</a>`, strings.TrimPrefix(baseFilterParams, "&"), boolClass(cameraFilter == "", " active"))
 	for _, cam := range cameras {
-		cameraButtons += fmt.Sprintf(`<a href="/?camera=%s" class="cam-btn%s">%s</a>`,
-			cam, boolClass(cameraFilter == cam, " active"), cam)
+		cameraButtons += fmt.Sprintf(`<a href="/?camera=%s%s" class="cam-btn%s">%s</a>`,
+			cam, baseFilterParams, boolClass(cameraFilter == cam, " active"), cam)
+	}
+
+	// Build person identity filter buttons
+	identityFilterParams := ""
+	if cameraFilter != "" {
+		identityFilterParams = "&camera=" + cameraFilter
+	}
+	identityButtons := fmt.Sprintf(`<a href="/?%s" class="cam-btn%s" data-i18n="all_identities">All</a>`, strings.TrimPrefix(identityFilterParams, "&"), boolClass(identityFilter == "", " active"))
+	for _, ident := range personIdentities {
+		displayName := ident
+		if ident == "_unknown" {
+			displayName = "Unknown"
+		}
+		identityButtons += fmt.Sprintf(`<a href="/?identity=%s%s" class="cam-btn%s">%s</a>`,
+			ident, identityFilterParams, boolClass(identityFilter == ident, " active"), displayName)
 	}
 
 	// Build label summary rows
@@ -196,6 +235,9 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 		if cameraFilter != "" {
 			baseParams += "&camera=" + cameraFilter
 		}
+		if identityFilter != "" {
+			baseParams += "&identity=" + identityFilter
+		}
 		if tz := r.URL.Query().Get("tz"); tz != "" {
 			baseParams += "&tz=" + tz
 		}
@@ -231,7 +273,7 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 	tzOpts := h.buildTimezoneOptions(loc.String())
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, dashboardTpl, tzOpts, len(events), len(labels), cameraButtons, labelRows, eventsHeading, eventRows, paginationHTML, h.timezoneName)
+	fmt.Fprintf(w, dashboardTpl, tzOpts, len(events), len(labels), cameraButtons, identityButtons, labelRows, eventsHeading, eventRows, paginationHTML, h.timezoneName)
 }
 
 func boolClass(cond bool, class string) string {
@@ -260,23 +302,73 @@ func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
 		grouped[e.Label] = append(grouped[e.Label], e)
 	}
 
+	// For person events, sub-group by identity (known persons first, then cluster unknowns).
+	// Unknown persons are clustered by camera + time proximity (within 5 min window).
+	type personCluster struct {
+		Name   string
+		Events []detector.Event
+	}
+	var personClusters []personCluster
+	if personEvents, ok := grouped["person"]; ok && len(personEvents) > 0 {
+		// 1. Group identified persons
+		identMap := make(map[string][]detector.Event)
+		var unknowns []detector.Event
+		for _, e := range personEvents {
+			if e.Identity != "" {
+				identMap[e.Identity] = append(identMap[e.Identity], e)
+			} else {
+				unknowns = append(unknowns, e)
+			}
+		}
+		// Sort identities alphabetically, but put user-annotated (non-"outsider") first
+		var identNames []string
+		for name := range identMap {
+			identNames = append(identNames, name)
+		}
+		sort.Slice(identNames, func(i, j int) bool {
+			ai := identNames[i] == "outsider"
+			aj := identNames[j] == "outsider"
+			if ai != aj {
+				return !ai // non-outsider first
+			}
+			return identNames[i] < identNames[j]
+		})
+		for _, name := range identNames {
+			personClusters = append(personClusters, personCluster{Name: name, Events: identMap[name]})
+		}
+		// 2. Cluster unknown persons by camera + time proximity (5 min)
+		type cameraTimeKey struct {
+			camera string
+			bucket int64
+		}
+		clusterMap := make(map[cameraTimeKey][]detector.Event)
+		var clusterKeys []cameraTimeKey
+		for _, e := range unknowns {
+			bucket := int64(e.StartTime) / 300 // 5 min buckets
+			key := cameraTimeKey{camera: e.Camera, bucket: bucket}
+			if _, exists := clusterMap[key]; !exists {
+				clusterKeys = append(clusterKeys, key)
+			}
+			clusterMap[key] = append(clusterMap[key], e)
+		}
+		// Sort clusters by most recent first
+		sort.Slice(clusterKeys, func(i, j int) bool {
+			return clusterKeys[i].bucket > clusterKeys[j].bucket
+		})
+		for idx, key := range clusterKeys {
+			name := fmt.Sprintf("Unknown #%d (%s)", idx+1, key.camera)
+			personClusters = append(personClusters, personCluster{Name: name, Events: clusterMap[key]})
+		}
+	}
+
 	// Build sections for each label
 	sections := ""
-	for _, label := range labels {
-		evts := grouped[label]
-		if len(evts) == 0 {
-			continue
-		}
-
-		// Display label name in Thai where applicable
-		displayName := labelDisplayName(label)
-
-		// Build thumbnail grid
-		thumbs := ""
-		showLimit := 50
+	// Helper to build thumbnail cards for a slice of events
+	buildThumbs := func(evts []detector.Event, showLimit int) (string, string) {
 		if len(evts) < showLimit {
 			showLimit = len(evts)
 		}
+		thumbs := ""
 		for _, e := range evts[:showLimit] {
 			t := time.Unix(int64(e.StartTime), int64(math.Mod(e.StartTime, 1)*1e9)).In(h.timezone)
 			ts := t.Format("15:04")
@@ -328,11 +420,38 @@ func (h *Handler) eventsPage(w http.ResponseWriter, r *http.Request) {
 				ts, ago,
 				identBadge, groupBadge)
 		}
-
 		moreIndicator := ""
 		if len(evts) > showLimit {
 			moreIndicator = fmt.Sprintf(`<div class="more-indicator">+%d more</div>`, len(evts)-showLimit)
 		}
+		return thumbs, moreIndicator
+	}
+
+	for _, label := range labels {
+		evts := grouped[label]
+		if len(evts) == 0 {
+			continue
+		}
+
+		displayName := labelDisplayName(label)
+
+		// For person label: render sub-sections grouped by identity
+		if label == "person" && len(personClusters) > 0 {
+			sections += fmt.Sprintf(`<div class="ev-section">
+				<h2>%s <span class="ev-count">%d Tracked Objects</span></h2>`, displayName, len(evts))
+			for _, cluster := range personClusters {
+				thumbs, moreIndicator := buildThumbs(cluster.Events, 30)
+				clusterLabel := cluster.Name
+				sections += fmt.Sprintf(`<div style="margin:0.8em 0 0.3em 0">
+					<h3 style="font-size:0.95em;color:#4fc3f7;margin-bottom:0.3em">%s <span style="color:#888;font-size:0.85em">(%d)</span></h3>
+					<div class="ev-grid">%s%s</div>
+				</div>`, clusterLabel, len(cluster.Events), thumbs, moreIndicator)
+			}
+			sections += `</div>`
+			continue
+		}
+
+		thumbs, moreIndicator := buildThumbs(evts, 50)
 
 		sections += fmt.Sprintf(`<div class="ev-section">
 			<h2>%s <span class="ev-count">%d Tracked Objects</span></h2>
@@ -799,7 +918,9 @@ var i18n = {
     images: "ภาพ",
     face_status_online: "พร้อมใช้งาน",
     face_status_offline: "ไม่ได้เชื่อมต่อ",
-    outside_person: "คนภายนอก"
+    outside_person: "คนภายนอก",
+    filter_by_person: "กรองตามบุคคล",
+    all_identities: "ทั้งหมด"
   },
   en: {
     dashboard: "Dashboard",
@@ -861,7 +982,9 @@ var i18n = {
     images: "images",
     face_status_online: "Online",
     face_status_offline: "Not connected",
-    outside_person: "Unknown person"
+    outside_person: "Unknown person",
+    filter_by_person: "Filter by Person",
+    all_identities: "All"
   }
 };
 
@@ -1106,6 +1229,11 @@ var dashboardTpl = `<!DOCTYPE html>
 
 <div class="section">
 <h2 data-i18n="filter_by_camera">Filter by Camera</h2>
+<div class="cam-filter">%s</div>
+</div>
+
+<div class="section">
+<h2 data-i18n="filter_by_person">Filter by Person</h2>
 <div class="cam-filter">%s</div>
 </div>
 

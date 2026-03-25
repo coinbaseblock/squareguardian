@@ -165,6 +165,31 @@ func (d *Detector) IdentifiedEvents(limit int) map[string][]Event {
 	return result
 }
 
+// PersonIdentities returns a deduplicated, sorted list of identity names
+// found on person events. Includes "outsider" and unidentified ("") counts.
+func (d *Detector) PersonIdentities() []string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	seen := make(map[string]bool)
+	var identities []string
+	for _, e := range d.events {
+		if e.Label != "person" {
+			continue
+		}
+		name := e.Identity
+		if name == "" {
+			name = "_unknown"
+		}
+		if !seen[name] {
+			seen[name] = true
+			identities = append(identities, name)
+		}
+	}
+	sort.Strings(identities)
+	return identities
+}
+
 // Cameras returns a deduplicated, sorted list of camera names.
 // It queries Frigate's config API for all configured cameras and merges
 // with cameras seen in cached events, so cameras appear even before
@@ -490,6 +515,10 @@ func (d *Detector) poll() {
 	}
 
 	if added > 0 {
+		// Sort events by StartTime descending (newest first) after adding new ones.
+		sort.Slice(d.events, func(i, j int) bool {
+			return d.events[i].StartTime > d.events[j].StartTime
+		})
 		d.dirty = true
 		log.Printf("detector: fetched %d new events (%d total, %d active)", added, len(d.events), len(d.activeEvents))
 	}
@@ -658,13 +687,12 @@ func (d *Detector) identifyPersonEvent(ev *Event) {
 	} else {
 		best := result.Matches[0]
 		if best.Status == "match" {
-			ev.Identity = best.Name
-			ev.Note = fmt.Sprintf("auto: identified %s (%.0f%%)", best.Name, best.Similarity*100)
-			log.Printf("detector: face-id: %s → %s (%.2f)", ev.ID, best.Name, best.Similarity)
-			identified = true
+			// Don't auto-assign identity — only suggest. User must confirm manually.
+			ev.Note = fmt.Sprintf("suggest: %s (%.0f%%) — click edit to confirm", best.Name, best.Similarity*100)
+			log.Printf("detector: face-id: %s → suggest (high) %s (%.2f) — awaiting manual confirm", ev.ID, best.Name, best.Similarity)
 			cooldownKey = ev.Camera + ":" + best.Name
 		} else if best.Status == "suggest" {
-			ev.Note = fmt.Sprintf("auto: possibly %s (%.0f%%)", best.Name, best.Similarity*100)
+			ev.Note = fmt.Sprintf("suggest: possibly %s (%.0f%%)", best.Name, best.Similarity*100)
 			log.Printf("detector: face-id: %s → suggest %s (%.2f)", ev.ID, best.Name, best.Similarity)
 		}
 	}
@@ -741,6 +769,12 @@ func (d *Detector) loadFromDisk() error {
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
+	// Sort events by StartTime descending (newest first).
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].StartTime > events[j].StartTime
+	})
+
 	d.events = events
 	d.idSet = make(map[string]bool, len(events))
 	for _, e := range events {
