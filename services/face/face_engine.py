@@ -49,9 +49,9 @@ def _preprocess(img: np.ndarray) -> np.ndarray:
 
     # Light denoising to reduce JPEG/compression artifacts from security cameras.
     # fastNlMeansDenoisingColored is effective but expensive; use small h values.
-    h, w = img.shape[:2]
-    if max(h, w) <= 1920:
-        img = cv2.fastNlMeansDenoisingColored(img, None, h=3, hForColorComponents=3,
+    img_h, img_w = img.shape[:2]
+    if max(img_h, img_w) <= 1920:
+        img = cv2.fastNlMeansDenoisingColored(img, None, h=3, hColor=3,
                                                templateWindowSize=7, searchWindowSize=21)
 
     return img
