@@ -163,9 +163,17 @@ def register(req: RegisterRequest):
         raise HTTPException(400, "at least one image is required")
 
     embeddings = []
-    for b64 in req.images:
-        img = decode_image(b64)
-        faces = face_engine.detect_faces(img)
+    for i, b64 in enumerate(req.images):
+        try:
+            img = decode_image(b64)
+        except Exception as e:
+            logger.warning("Failed to decode image %d: %s", i, e)
+            continue
+        try:
+            faces = face_engine.detect_faces(img)
+        except Exception as e:
+            logger.error("Face detection failed on image %d: %s", i, e)
+            continue
         if not faces:
             continue
         # Take the face with highest confidence
