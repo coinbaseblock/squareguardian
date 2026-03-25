@@ -106,7 +106,7 @@ func (fc *FaceClient) IsAvailable() bool {
 // face detection accuracy.
 func fetchSnapshot(frigateURL, eventID string) ([]byte, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	url := fmt.Sprintf("%s/api/events/%s/snapshot.jpg?crop=1&h=720&quality=95", frigateURL, eventID)
+	url := fmt.Sprintf("%s/api/events/%s/snapshot.jpg?crop=1&h=1080&quality=95", frigateURL, eventID)
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("fetch snapshot: %w", err)
