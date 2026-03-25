@@ -79,7 +79,8 @@ def detect_faces(img: np.ndarray) -> list[dict]:
     Uses multi-strategy detection:
     1. Standard detection on preprocessed image
     2. Padded detection for faces near frame edges (wide-angle cameras)
-    3. Upscaled detection for small/distant faces on high-res images
+    3. Upscaled detection with larger det_size for small/distant faces
+    4. Center crop for wide-angle security cameras where face is small in frame
     """
     if _app is None:
         raise RuntimeError("Model not initialized")
@@ -114,13 +115,39 @@ def detect_faces(img: np.ndarray) -> list[dict]:
             faces = padded_faces
             logger.info("Detected %d face(s) with border padding", len(faces))
 
-    # Strategy 3: If still no faces and image is large, try larger det_size
-    if not faces and max(h, w) >= 1920:
+    # Strategy 3: If still no faces, try larger det_size.
+    # Previously only triggered for ≥1920px images, but small faces in 720p
+    # camera snapshots also benefit from a larger detection grid.
+    if not faces and _DET_SIZE < 960:
         logger.debug("No faces at default det_size, retrying with larger det_size on %dx%d image", w, h)
         _app.prepare(ctx_id=-1, det_size=(960, 960))
         faces = _app.get(img)
         # Restore original det_size
         _app.prepare(ctx_id=-1, det_size=(_DET_SIZE, _DET_SIZE))
+
+    # Strategy 4: Center crop — for security cameras where the subject stands
+    # in front of the camera but the wide-angle lens makes the face small.
+    # Cropping to the central region effectively enlarges the face for detection.
+    if not faces:
+        crop_pct = 0.35  # crop 35% from each side → keep central 30% width
+        cx1 = int(w * crop_pct)
+        cy1 = int(h * 0.10)  # less top crop since security cameras are elevated
+        cx2 = int(w * (1 - crop_pct))
+        cy2 = int(h * 0.85)
+        if cx2 - cx1 > 100 and cy2 - cy1 > 100:
+            crop = img[cy1:cy2, cx1:cx2]
+            logger.debug("No faces, retrying with center crop (%d,%d)-(%d,%d) on %dx%d image",
+                         cx1, cy1, cx2, cy2, w, h)
+            crop_faces = _app.get(crop)
+            if crop_faces:
+                # Adjust bounding boxes back to original image coordinates
+                for face in crop_faces:
+                    face.bbox[0] += cx1
+                    face.bbox[1] += cy1
+                    face.bbox[2] += cx1
+                    face.bbox[3] += cy1
+                faces = crop_faces
+                logger.info("Detected %d face(s) with center crop", len(faces))
 
     results = []
     for face in faces:
