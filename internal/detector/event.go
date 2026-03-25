@@ -16,10 +16,10 @@ type Event struct {
 	// User-provided annotations
 	Identity     string `json:"identity,omitempty"`      // e.g. person name
 	RoomNumber   string `json:"room_number,omitempty"`   // e.g. A0213
-	LicensePlate string `json:"license_plate,omitempty"` // e.g. ทร 3474
-	Province     string `json:"province,omitempty"`      // e.g. กรุงเทพ
+	LicensePlate string `json:"license_plate,omitempty"` // e.g. ABC 1234
+	Province     string `json:"province,omitempty"`      // e.g. Bangkok
 	VehicleBrand string `json:"vehicle_brand,omitempty"` // e.g. Toyota Camry
-	VehicleColor string `json:"vehicle_color,omitempty"` // e.g. สีขาว
+	VehicleColor string `json:"vehicle_color,omitempty"` // e.g. White
 	VehicleInfo  string `json:"vehicle_info,omitempty"`  // legacy combined field
 	Note         string `json:"note,omitempty"`          // free-form user feedback
 

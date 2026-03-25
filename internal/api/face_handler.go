@@ -42,7 +42,7 @@ func (h *Handler) faceProxy(w http.ResponseWriter, r *http.Request) {
 
 // facesPage renders the Face Gallery UI.
 func (h *Handler) facesPage(w http.ResponseWriter, r *http.Request) {
-	faceServiceStatus := "ไม่ได้เชื่อมต่อ"
+	faceServiceStatus := "Disconnected"
 	statusClass := "status-offline"
 	if h.faceServiceURL != "" {
 		client := &http.Client{Timeout: 3 * time.Second}
@@ -50,7 +50,7 @@ func (h *Handler) facesPage(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
-				faceServiceStatus = "พร้อมใช้งาน"
+				faceServiceStatus = "Online"
 				statusClass = "status-online"
 			}
 		}
@@ -59,14 +59,14 @@ func (h *Handler) facesPage(w http.ResponseWriter, r *http.Request) {
 	navHTML := `<a href="/" class="nav-link" data-i18n="dashboard">Dashboard</a>` +
 		`<a href="/events" class="nav-link" data-i18n="events_by_type">Events</a>` +
 		`<a href="/faces" class="nav-link active" data-i18n="face_gallery">Face Gallery</a>` +
-		`<button class="lang-btn" id="langToggle" onclick="toggleLang()" style="margin-left:auto;background:#252836;border:1px solid #555;color:#4fc3f7;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:.8em;font-weight:bold">EN</button>`
+		`<button class="lang-btn" id="langToggle" onclick="toggleLang()" style="margin-left:auto;background:#252836;border:1px solid #555;color:#4fc3f7;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:.8em;font-weight:bold">TH</button>`
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, facesPageTpl, navHTML, statusClass, faceServiceStatus)
 }
 
 var facesPageTpl = `<!DOCTYPE html>
-<html lang="th">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -177,30 +177,30 @@ var facesPageTpl = `<!DOCTYPE html>
   </div>
 
   <div class="section">
-    <h2>ลงทะเบียนบุคคลใหม่</h2>
+    <h2>Register New Person</h2>
 
     <div class="face-note">
-      ระบบจดจำใบหน้าใช้เฉพาะ <strong>ใบหน้า</strong> ในการแยกแยะบุคคล ไม่จำเป็นต้องถ่ายเต็มตัว — ถ่ายให้เห็นใบหน้าชัดเจนเพียงพอ
+      The face recognition system uses only <strong>faces</strong> to identify people. No need for full-body photos — just make sure the face is clearly visible.
     </div>
 
     <div class="tabs">
-      <button class="tab active" onclick="switchTab('upload')">อัปโหลดรูปภาพ</button>
-      <button class="tab" onclick="switchTab('camera')">ถ่ายจากกล้อง</button>
+      <button class="tab active" onclick="switchTab('upload')">Upload Images</button>
+      <button class="tab" onclick="switchTab('camera')">Capture from Camera</button>
     </div>
 
     <!-- Tab 1: Upload -->
     <div id="tab-upload" class="tab-content active">
       <div class="register-form">
         <div>
-          <label for="personName">ชื่อบุคคล</label>
-          <input type="text" id="personName" placeholder="เช่น สมชาย, พนักงานส่งของ">
+          <label for="personName">Person Name</label>
+          <input type="text" id="personName" placeholder="e.g. John, Delivery Person">
         </div>
         <div>
-          <label for="faceImages">ภาพใบหน้า (1-5 ภาพ)</label>
+          <label for="faceImages">Face Images (1-5 images)</label>
           <input type="file" id="faceImages" accept="image/*" multiple>
         </div>
         <div>
-          <button class="btn btn-primary" onclick="registerPerson()">ลงทะเบียน</button>
+          <button class="btn btn-primary" onclick="registerPerson()">Register</button>
         </div>
       </div>
     </div>
@@ -210,33 +210,33 @@ var facesPageTpl = `<!DOCTYPE html>
       <div class="register-form" style="max-width:100%%">
         <div style="display:flex; gap:1em; flex-wrap:wrap; align-items:end;">
           <div style="flex:1; min-width:200px;">
-            <label for="camPersonName">ชื่อบุคคล</label>
-            <input type="text" id="camPersonName" placeholder="เช่น สมชาย, พนักงานส่งของ">
+            <label for="camPersonName">Person Name</label>
+            <input type="text" id="camPersonName" placeholder="e.g. John, Delivery Person">
           </div>
           <div style="flex:1; min-width:200px;">
-            <label for="cameraSelect">เลือกกล้อง</label>
+            <label for="cameraSelect">Select Camera</label>
             <select id="cameraSelect" onchange="startCameraPreview()">
-              <option value="">-- กำลังโหลดรายชื่อกล้อง --</option>
+              <option value="">-- Loading cameras --</option>
             </select>
           </div>
         </div>
 
         <div class="camera-area">
           <div class="camera-preview" id="cameraPreview">
-            <div class="no-feed" id="noFeed">เลือกกล้องเพื่อเริ่มดูภาพ</div>
+            <div class="no-feed" id="noFeed">Select a camera to start preview</div>
             <img id="cameraImg" style="display:none" alt="Camera feed">
           </div>
 
           <div class="pose-panel">
-            <h3 style="font-size:0.95em; margin-bottom:0.6em; color:#93c5fd;">ท่าถ่ายภาพ</h3>
+            <h3 style="font-size:0.95em; margin-bottom:0.6em; color:#93c5fd;">Pose Guide</h3>
             <div class="pose-guide" id="poseGuide">
               <!-- Populated by JS -->
             </div>
 
             <div class="capture-actions">
-              <button class="btn btn-primary" id="captureBtn" onclick="captureShot()" disabled>ถ่ายภาพ</button>
-              <button class="btn btn-secondary" id="skipBtn" onclick="skipPose()" disabled>ข้ามท่านี้</button>
-              <button class="btn btn-success" id="camRegisterBtn" onclick="registerFromCamera()" disabled>ลงทะเบียน</button>
+              <button class="btn btn-primary" id="captureBtn" onclick="captureShot()" disabled>Capture</button>
+              <button class="btn btn-secondary" id="skipBtn" onclick="skipPose()" disabled>Skip</button>
+              <button class="btn btn-success" id="camRegisterBtn" onclick="registerFromCamera()" disabled>Register</button>
             </div>
 
             <div class="captured-shots" id="capturedShots"></div>
@@ -247,22 +247,22 @@ var facesPageTpl = `<!DOCTYPE html>
   </div>
 
   <div class="section">
-    <h2>บุคคลที่ลงทะเบียนแล้ว</h2>
+    <h2>Registered Persons</h2>
     <div id="galleryContainer">
       <div class="empty-state">
-        <p>กำลังโหลด...</p>
+        <p>Loading...</p>
       </div>
     </div>
   </div>
 
   <div class="section">
-    <h2>ประวัติการตรวจพบ</h2>
+    <h2>Detection History</h2>
     <div class="face-note">
-      เมื่อกล้องตรวจพบบุคคลที่ลงทะเบียนแล้ว ระบบจะระบุตัวตนอัตโนมัติและแสดงผลที่นี่
+      When a camera detects a registered person, the system will automatically identify them and show results here.
     </div>
     <div id="detectionHistory">
       <div class="empty-state">
-        <p>กำลังโหลด...</p>
+        <p>Loading...</p>
       </div>
     </div>
   </div>
@@ -273,11 +273,11 @@ var facesPageTpl = `<!DOCTYPE html>
 <script>
 // --- Pose definitions ---
 const POSES = [
-  { id: 'front',  label: 'มองตรง',     hint: 'มองตรงมาที่กล้อง',        icon: '正' },
-  { id: 'left',   label: 'หันซ้าย',     hint: 'หันหน้าไปทางซ้ายเล็กน้อย', icon: '←' },
-  { id: 'right',  label: 'หันขวา',      hint: 'หันหน้าไปทางขวาเล็กน้อย',  icon: '→' },
-  { id: 'up',     label: 'เงยหน้าขึ้น',  hint: 'เงยหน้าขึ้นเล็กน้อย',      icon: '↑' },
-  { id: 'down',   label: 'ก้มหน้าลง',   hint: 'ก้มหน้าลงเล็กน้อย',       icon: '↓' },
+  { id: 'front',  label: 'Front',      hint: 'Look straight at the camera', icon: '正' },
+  { id: 'left',   label: 'Turn Left',  hint: 'Turn your face slightly left', icon: '←' },
+  { id: 'right',  label: 'Turn Right', hint: 'Turn your face slightly right', icon: '→' },
+  { id: 'up',     label: 'Look Up',    hint: 'Tilt your face slightly up',    icon: '↑' },
+  { id: 'down',   label: 'Look Down',  hint: 'Tilt your face slightly down',  icon: '↓' },
 ];
 
 let currentPoseIdx = 0;
@@ -306,40 +306,40 @@ async function loadGallery() {
     const identData = identResp && identResp.ok ? await identResp.json() : {};
 
     if (!data.persons || data.persons.length === 0) {
-      container.innerHTML = '<div class="empty-state"><p>ยังไม่มีบุคคลที่ลงทะเบียน</p><p>เพิ่มบุคคลใหม่โดยกรอกชื่อและอัปโหลดภาพด้านบน หรือถ่ายจากกล้อง</p></div>';
+      container.innerHTML = '<div class="empty-state"><p>No registered persons yet.</p><p>Add a new person by entering a name and uploading images above, or capture from a camera.</p></div>';
       return;
     }
     const initials = (name) => name.charAt(0).toUpperCase();
     container.innerHTML = '<div class="gallery">' + data.persons.map(p => {
       const detections = identData[p.name] || [];
       const detCount = detections.length;
-      let detInfo = '<div class="person-info" style="color:#6b7280">ยังไม่เคยตรวจพบ</div>';
+      let detInfo = '<div class="person-info" style="color:#6b7280">Never detected</div>';
       if (detCount > 0) {
         const lastTime = timeAgo(detections[0].start_time);
-        detInfo = '<div class="person-info" style="color:#22c55e">ตรวจพบ ' + detCount + ' ครั้ง</div>' +
-                  '<div class="person-info" style="color:#60a5fa; font-size:0.75em">ล่าสุด: ' + lastTime + '</div>';
+        detInfo = '<div class="person-info" style="color:#22c55e">Detected ' + detCount + ' times</div>' +
+                  '<div class="person-info" style="color:#60a5fa; font-size:0.75em">Last: ' + lastTime + '</div>';
       }
       return '<div class="person-card">' +
         '<div class="person-avatar">' + initials(p.name) + '</div>' +
         '<div class="person-name">' + escapeHtml(p.name) + '</div>' +
         '<div class="person-info">' + p.face_count + ' embeddings</div>' +
-        '<div class="person-info">แหล่ง: ' + escapeHtml(p.source) + '</div>' +
+        '<div class="person-info">Source: ' + escapeHtml(p.source) + '</div>' +
         detInfo +
         '<div class="actions">' +
-          '<button class="btn btn-danger btn-sm" onclick="deletePerson(\'' + p.id + '\',\'' + escapeHtml(p.name) + '\')">ลบ</button>' +
+          '<button class="btn btn-danger btn-sm" onclick="deletePerson(\'' + p.id + '\',\'' + escapeHtml(p.name) + '\')">Delete</button>' +
         '</div>' +
       '</div>';
     }).join('') + '</div>';
   } catch (e) {
-    container.innerHTML = '<div class="empty-state"><p>ไม่สามารถเชื่อมต่อ Face Service ได้</p><p>' + escapeHtml(e.message) + '</p></div>';
+    container.innerHTML = '<div class="empty-state"><p>Cannot connect to Face Service.</p><p>' + escapeHtml(e.message) + '</p></div>';
   }
 }
 
 async function registerPerson() {
   const name = document.getElementById('personName').value.trim();
   const files = document.getElementById('faceImages').files;
-  if (!name) { showToast('กรุณาใส่ชื่อบุคคล', 'error'); return; }
-  if (files.length === 0) { showToast('กรุณาเลือกภาพอย่างน้อย 1 ภาพ', 'error'); return; }
+  if (!name) { showToast('Please enter a person name', 'error'); return; }
+  if (files.length === 0) { showToast('Please select at least 1 image', 'error'); return; }
 
   const images = [];
   for (const file of files) {
@@ -355,24 +355,24 @@ async function registerPerson() {
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || 'Registration failed');
-    showToast('ลงทะเบียน "' + name + '" สำเร็จ (' + data.embeddings_count + ' embeddings)', 'success');
+    showToast('Registered "' + name + '" successfully (' + data.embeddings_count + ' embeddings)', 'success');
     document.getElementById('personName').value = '';
     document.getElementById('faceImages').value = '';
     loadGallery();
   } catch (e) {
-    showToast('เกิดข้อผิดพลาด: ' + e.message, 'error');
+    showToast('Error: ' + e.message, 'error');
   }
 }
 
 async function deletePerson(id, name) {
-  if (!confirm('ต้องการลบ "' + name + '" หรือไม่?')) return;
+  if (!confirm('Delete "' + name + '"?')) return;
   try {
     const resp = await fetch('/api/face/gallery/' + id, { method: 'DELETE' });
     if (!resp.ok) throw new Error('Delete failed');
-    showToast('ลบ "' + name + '" แล้ว', 'success');
+    showToast('Deleted "' + name + '"', 'success');
     loadGallery();
   } catch (e) {
-    showToast('เกิดข้อผิดพลาด: ' + e.message, 'error');
+    showToast('Error: ' + e.message, 'error');
   }
 }
 
@@ -383,13 +383,13 @@ async function loadCameras() {
     const resp = await fetch('/api/cameras');
     const data = await resp.json();
     if (!data.cameras || data.cameras.length === 0) {
-      sel.innerHTML = '<option value="">ไม่พบกล้อง</option>';
+      sel.innerHTML = '<option value="">No cameras found</option>';
       return;
     }
-    sel.innerHTML = '<option value="">-- เลือกกล้อง --</option>' +
+    sel.innerHTML = '<option value="">-- Select camera --</option>' +
       data.cameras.map(c => '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>').join('');
   } catch (e) {
-    sel.innerHTML = '<option value="">โหลดรายชื่อกล้องไม่ได้</option>';
+    sel.innerHTML = '<option value="">Failed to load cameras</option>';
   }
 }
 
@@ -458,7 +458,7 @@ async function captureShot() {
 
   try {
     const resp = await fetch('/api/camera-snapshot/' + encodeURIComponent(cam) + '?t=' + Date.now());
-    if (!resp.ok) throw new Error('ไม่สามารถดึงภาพจากกล้อง');
+    if (!resp.ok) throw new Error('Failed to capture image from camera');
     const blob = await resp.blob();
     const b64 = await blobToBase64(blob);
     capturedImages.push(b64);
@@ -488,8 +488,8 @@ function advancePose() {
 
 async function registerFromCamera() {
   const name = document.getElementById('camPersonName').value.trim();
-  if (!name) { showToast('กรุณาใส่ชื่อบุคคล', 'error'); return; }
-  if (capturedImages.length === 0) { showToast('กรุณาถ่ายภาพอย่างน้อย 1 ภาพ', 'error'); return; }
+  if (!name) { showToast('Please enter a person name', 'error'); return; }
+  if (capturedImages.length === 0) { showToast('Please capture at least 1 image', 'error'); return; }
 
   document.getElementById('camRegisterBtn').disabled = true;
 
@@ -501,7 +501,7 @@ async function registerFromCamera() {
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || 'Registration failed');
-    showToast('ลงทะเบียน "' + name + '" สำเร็จ (' + data.embeddings_count + ' embeddings จาก ' + capturedImages.length + ' ภาพ)', 'success');
+    showToast('Registered "' + name + '" successfully (' + data.embeddings_count + ' embeddings from ' + capturedImages.length + ' images)', 'success');
 
     // Reset
     document.getElementById('camPersonName').value = '';
@@ -514,7 +514,7 @@ async function registerFromCamera() {
     document.getElementById('camRegisterBtn').disabled = true;
     loadGallery();
   } catch (e) {
-    showToast('เกิดข้อผิดพลาด: ' + e.message, 'error');
+    showToast('Error: ' + e.message, 'error');
     document.getElementById('camRegisterBtn').disabled = false;
   }
 }
@@ -562,7 +562,7 @@ async function loadDetectionHistory() {
 
     const names = Object.keys(data);
     if (names.length === 0) {
-      container.innerHTML = '<div class="empty-state"><p>ยังไม่มีการตรวจพบบุคคลที่ลงทะเบียน</p><p>เมื่อกล้องตรวจพบใบหน้าที่ตรงกับบุคคลที่ลงทะเบียน จะแสดงที่นี่อัตโนมัติ</p></div>';
+      container.innerHTML = '<div class="empty-state"><p>No registered persons detected yet.</p><p>When a camera detects a face matching a registered person, it will appear here automatically.</p></div>';
       return;
     }
 
@@ -578,16 +578,16 @@ async function loadDetectionHistory() {
       html += '<div class="detection-person">';
       html += '<div class="detection-person-header">';
       html += '<span class="detection-person-name">' + escapeHtml(name) + '</span>';
-      html += '<span class="detection-badge">ตรวจพบ</span>';
-      html += '<span class="detection-person-count">' + events.length + ' ครั้ง</span>';
-      html += '<span class="detection-person-last">ล่าสุด: ' + ago + '</span>';
+      html += '<span class="detection-badge">Detected</span>';
+      html += '<span class="detection-person-count">' + events.length + ' times</span>';
+      html += '<span class="detection-person-last">Last: ' + ago + '</span>';
       html += '</div>';
       html += '<div class="detection-grid">';
 
       for (const ev of events) {
         const t = new Date(ev.start_time * 1000);
-        const ts = t.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-        const ds = t.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+        const ts = t.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        const ds = t.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
         const thumbSrc = ev.thumbnail
           ? 'data:image/jpeg;base64,' + ev.thumbnail
           : '/api/thumbnail/' + ev.id;
@@ -600,7 +600,7 @@ async function loadDetectionHistory() {
         html += '<div class="detection-card-info">';
         html += '<div class="detection-card-time">' + ds + ' ' + ts + '</div>';
         html += '<div class="detection-card-camera">' + escapeHtml(ev.camera) + '</div>';
-        if (score) html += '<div class="detection-card-score">ความคล้าย: ' + score + '</div>';
+        if (score) html += '<div class="detection-card-score">Similarity: ' + score + '</div>';
         html += '</div></div>';
       }
 
@@ -609,17 +609,17 @@ async function loadDetectionHistory() {
 
     container.innerHTML = html;
   } catch (e) {
-    container.innerHTML = '<div class="empty-state"><p>ไม่สามารถโหลดประวัติการตรวจพบ</p><p>' + escapeHtml(e.message) + '</p></div>';
+    container.innerHTML = '<div class="empty-state"><p>Failed to load detection history.</p><p>' + escapeHtml(e.message) + '</p></div>';
   }
 }
 
 function timeAgo(timestamp) {
   const now = Date.now() / 1000;
   const diff = now - timestamp;
-  if (diff < 60) return 'เมื่อสักครู่';
-  if (diff < 3600) return Math.floor(diff / 60) + ' นาทีที่แล้ว';
-  if (diff < 86400) return Math.floor(diff / 3600) + ' ชั่วโมงที่แล้ว';
-  return Math.floor(diff / 86400) + ' วันที่แล้ว';
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + ' min ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + ' hr ago';
+  return Math.floor(diff / 86400) + ' days ago';
 }
 
 // Init
