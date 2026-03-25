@@ -27,6 +27,7 @@ type FaceMatch struct {
 type identifyRequest struct {
 	Image   string `json:"image"`
 	EventID string `json:"event_id"`
+	Camera  string `json:"camera"`
 }
 
 type identifyResponse struct {
@@ -54,12 +55,13 @@ type IdentifyResult struct {
 }
 
 // Identify sends a snapshot image to the face-service and returns matches.
-func (fc *FaceClient) Identify(imageData []byte, eventID string) (*IdentifyResult, error) {
+func (fc *FaceClient) Identify(imageData []byte, eventID, camera string) (*IdentifyResult, error) {
 	b64 := base64.StdEncoding.EncodeToString(imageData)
 
 	body, err := json.Marshal(identifyRequest{
 		Image:   b64,
 		EventID: eventID,
+		Camera:  camera,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
