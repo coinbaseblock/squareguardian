@@ -716,107 +716,191 @@ func (h *Handler) proxyFrigate(w http.ResponseWriter, path string) {
 	io.Copy(w, resp.Body)
 }
 
+// fetchRegisteredPersonsJSON fetches registered persons from the face service
+// and returns a JSON-safe string for embedding in HTML templates.
+func (h *Handler) fetchRegisteredPersonsJSON() string {
+	if h.faceServiceURL == "" {
+		return "[]"
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(h.faceServiceURL + "/api/face/gallery")
+	if err != nil {
+		return "[]"
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "[]"
+	}
+	var data struct {
+		Persons []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			CarPlate string `json:"car_plate"`
+			Room     string `json:"room"`
+		} `json:"persons"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "[]"
+	}
+	out, err := json.Marshal(data.Persons)
+	if err != nil {
+		return "[]"
+	}
+	return string(out)
+}
+
+func (h *Handler) buildIdentGrid(knownIdents map[string]detector.Event) string {
+	if len(knownIdents) == 0 {
+		return ""
+	}
+	html := `<div class="ident-grid">`
+	for name, e := range knownIdents {
+		weightLabel := "manual"
+		if e.IdentityWeight > 0 && e.IdentityWeight < 1.0 {
+			weightLabel = fmt.Sprintf("suggested %.0f%%", e.IdentityWeight*100)
+		}
+		thumbSrc := fmt.Sprintf("/api/thumbnail/%s", e.ID)
+		if e.Thumbnail != "" {
+			thumbSrc = fmt.Sprintf("data:image/jpeg;base64,%s", e.Thumbnail)
+		}
+		html += fmt.Sprintf(
+			`<div class="ident-card" data-identity="%s">
+				<img src="%s" alt="%s">
+				<div class="ident-name">%s</div>
+				<div class="ident-weight">%s</div>
+			</div>`,
+			escapeJS(name), thumbSrc, escapeJS(name), name, weightLabel)
+	}
+	html += `</div>`
+	return html
+}
+
+func (h *Handler) buildUnidentGrid(events []detector.Event, knownIdents map[string]detector.Event, category string) string {
+	if len(events) == 0 {
+		return ""
+	}
+	html := `<div class="unident-grid">`
+	for _, e := range events {
+		t := time.Unix(int64(e.StartTime), 0).In(h.timezone)
+		ts := t.Format("2006-01-02 15:04:05")
+		thumbSrc := fmt.Sprintf("/api/thumbnail/%s", e.ID)
+		if e.Thumbnail != "" {
+			thumbSrc = fmt.Sprintf("data:image/jpeg;base64,%s", e.Thumbnail)
+		}
+		zone := h.displayZone(e)
+		if zone == "" {
+			zone = e.Camera
+		}
+
+		// Build identity option buttons from known identities
+		identBtns := ""
+		for name := range knownIdents {
+			identBtns += fmt.Sprintf(
+				`<button class="suggest-btn" onclick="suggestIdent('%s','%s',0.5)">%s</button>`,
+				e.ID, escapeJS(name), name)
+		}
+		// "Add to existing registered" button (low-weight merge)
+		identBtns += fmt.Sprintf(
+			`<button class="suggest-btn exist-btn" onclick="addToExisting('%s','%s')">+ Add to Registered</button>`,
+			e.ID, category)
+		// "Add new" button
+		identBtns += fmt.Sprintf(
+			`<button class="suggest-btn new-btn" onclick="addNewIdent('%s','%s')">+ New</button>`,
+			e.ID, category)
+
+		extraInfo := ""
+		if e.LicensePlate != "" {
+			extraInfo += fmt.Sprintf(`<div class="unident-plate">Plate: %s</div>`, e.LicensePlate)
+		}
+		if e.VehicleBrand != "" {
+			extraInfo += fmt.Sprintf(`<div class="unident-plate">%s</div>`, e.VehicleBrand)
+		}
+
+		html += fmt.Sprintf(
+			`<div class="unident-card" data-event-id="%s">
+				<img src="%s" alt="%s" class="unident-thumb">
+				<div class="unident-info">
+					<div class="unident-time">%s</div>
+					<div class="unident-camera">%s · %s</div>
+					%s
+				</div>
+				<div class="unident-actions">
+					<div class="suggest-label" data-i18n="who_is_this">Who is this?</div>
+					<div class="suggest-btns">%s</div>
+					<div class="suggest-weight">
+						<label data-i18n="confidence_level">Confidence:</label>
+						<input type="range" min="10" max="90" value="50" class="weight-slider" id="weight-%s"
+							oninput="document.getElementById('wv-%s').textContent=this.value+'%%'">
+						<span id="wv-%s" class="weight-val">50%%</span>
+					</div>
+				</div>
+			</div>`,
+			e.ID, thumbSrc, e.Label, ts, e.Camera, zone, extraInfo, identBtns, e.ID, e.ID, e.ID)
+	}
+	html += `</div>`
+	return html
+}
+
 func (h *Handler) weightsPage(w http.ResponseWriter, r *http.Request) {
 	loc := h.resolveTimezone(r)
 	origLoc := h.timezone
 	h.timezone = loc
 	defer func() { h.timezone = origLoc }()
 
-	// Get unidentified person events (max 50 for the page)
-	unidentified := h.det.UnidentifiedPersonEvents(50)
+	// --- Person data ---
+	unidentPersons := h.det.UnidentifiedPersonEvents(50)
+	knownPersonIdents := h.det.KnownIdentities()
 
-	// Get known identities with representative thumbnails
-	knownIdents := h.det.KnownIdentities()
-
-	// Build known identity cards HTML
-	knownHTML := ""
-	if len(knownIdents) == 0 {
-		knownHTML = `<p style="color:#888;font-size:.9em" data-i18n="no_known_identities">No identified persons yet. Use the feedback button on the Dashboard to manually identify someone first.</p>`
-	} else {
-		knownHTML = `<div class="ident-grid">`
-		for name, e := range knownIdents {
-			weightLabel := "manual"
-			if e.IdentityWeight > 0 && e.IdentityWeight < 1.0 {
-				weightLabel = fmt.Sprintf("suggested %.0f%%", e.IdentityWeight*100)
-			}
-			thumbSrc := fmt.Sprintf("/api/thumbnail/%s", e.ID)
-			if e.Thumbnail != "" {
-				thumbSrc = fmt.Sprintf("data:image/jpeg;base64,%s", e.Thumbnail)
-			}
-			knownHTML += fmt.Sprintf(
-				`<div class="ident-card" data-identity="%s">
-					<img src="%s" alt="%s">
-					<div class="ident-name">%s</div>
-					<div class="ident-weight">%s</div>
-				</div>`,
-				escapeJS(name), thumbSrc, escapeJS(name), name, weightLabel)
-		}
-		knownHTML += `</div>`
+	knownPersonsHTML := h.buildIdentGrid(knownPersonIdents)
+	if knownPersonsHTML == "" {
+		knownPersonsHTML = `<p style="color:#888;font-size:.9em" data-i18n="no_known_identities">No identified persons yet. Use the feedback button on the Dashboard to manually identify someone first.</p>`
+	}
+	unidentPersonsHTML := h.buildUnidentGrid(unidentPersons, knownPersonIdents, "person")
+	if unidentPersonsHTML == "" {
+		unidentPersonsHTML = `<p style="color:#888;font-size:.9em" data-i18n="no_unidentified">All person events have been identified!</p>`
 	}
 
-	// Build unidentified event cards
-	unidentHTML := ""
-	if len(unidentified) == 0 {
-		unidentHTML = `<p style="color:#888;font-size:.9em" data-i18n="no_unidentified">All person events have been identified!</p>`
-	} else {
-		unidentHTML = `<div class="unident-grid">`
-		for _, e := range unidentified {
-			t := time.Unix(int64(e.StartTime), 0).In(h.timezone)
-			ts := t.Format("2006-01-02 15:04:05")
-			thumbSrc := fmt.Sprintf("/api/thumbnail/%s", e.ID)
-			if e.Thumbnail != "" {
-				thumbSrc = fmt.Sprintf("data:image/jpeg;base64,%s", e.Thumbnail)
-			}
-			zone := h.displayZone(e)
-			if zone == "" {
-				zone = e.Camera
-			}
+	// --- Car data ---
+	unidentCars := h.det.UnidentifiedCarEvents(50)
+	knownCarIdents := h.det.KnownCarIdentities()
 
-			// Build identity option buttons
-			identBtns := ""
-			for name := range knownIdents {
-				identBtns += fmt.Sprintf(
-					`<button class="suggest-btn" onclick="suggestIdent('%s','%s',0.5)">%s</button>`,
-					e.ID, escapeJS(name), name)
-			}
-			identBtns += fmt.Sprintf(
-				`<button class="suggest-btn new-btn" onclick="addNewIdent('%s')">+ New</button>`, e.ID)
-
-			unidentHTML += fmt.Sprintf(
-				`<div class="unident-card" data-event-id="%s">
-					<img src="%s" alt="person" class="unident-thumb">
-					<div class="unident-info">
-						<div class="unident-time">%s</div>
-						<div class="unident-camera">%s · %s</div>
-					</div>
-					<div class="unident-actions">
-						<div class="suggest-label" data-i18n="who_is_this">Who is this?</div>
-						<div class="suggest-btns">%s</div>
-						<div class="suggest-weight">
-							<label data-i18n="confidence_level">Confidence:</label>
-							<input type="range" min="10" max="90" value="50" class="weight-slider" id="weight-%s"
-								oninput="document.getElementById('wv-%s').textContent=this.value+'%%'">
-							<span id="wv-%s" class="weight-val">50%%</span>
-						</div>
-					</div>
-				</div>`,
-				e.ID, thumbSrc, ts, e.Camera, zone, identBtns, e.ID, e.ID, e.ID)
-		}
-		unidentHTML += `</div>`
+	knownCarsHTML := h.buildIdentGrid(knownCarIdents)
+	if knownCarsHTML == "" {
+		knownCarsHTML = `<p style="color:#888;font-size:.9em">No identified vehicles yet.</p>`
 	}
+	unidentCarsHTML := h.buildUnidentGrid(unidentCars, knownCarIdents, "car")
+	if unidentCarsHTML == "" {
+		unidentCarsHTML = `<p style="color:#888;font-size:.9em">All vehicle events have been identified!</p>`
+	}
+
+	// Fetch registered persons from face gallery for "add to existing" feature
+	registeredPersonsJSON := h.fetchRegisteredPersonsJSON()
+
+	// Build known car identities JSON for "add to existing" car modal
+	type carEntry struct {
+		Name     string `json:"name"`
+		Plate    string `json:"plate"`
+		Brand    string `json:"brand"`
+		EventID  string `json:"event_id"`
+	}
+	var carEntries []carEntry
+	for name, e := range knownCarIdents {
+		carEntries = append(carEntries, carEntry{Name: name, Plate: e.LicensePlate, Brand: e.VehicleBrand, EventID: e.ID})
+	}
+	knownCarsJSON, _ := json.Marshal(carEntries)
 
 	// Label weights section
 	labels := h.det.TrackedLabels()
 	sort.Strings(labels)
 	weights := h.det.GetWeights()
 	weightMap := make(map[string]float64)
-	for _, w := range weights {
-		weightMap[w.Label] = w.Weight
+	for _, wt := range weights {
+		weightMap[wt.Label] = wt.Weight
 	}
 	labelWeightRows := ""
 	for _, l := range labels {
-		w := weightMap[l]
-		pct := int(w * 100)
+		wt := weightMap[l]
+		pct := int(wt * 100)
 		labelWeightRows += fmt.Sprintf(
 			`<tr>
 				<td>%s</td>
@@ -835,11 +919,20 @@ func (h *Handler) weightsPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, weightsPageTpl,
 		tzOpts,
-		knownHTML,
-		len(unidentified),
-		unidentHTML,
+		// Person section
+		knownPersonsHTML,
+		len(unidentPersons),
+		unidentPersonsHTML,
+		// Car section
+		knownCarsHTML,
+		len(unidentCars),
+		unidentCarsHTML,
+		// Label weights (in HTML body)
 		labelWeightRows,
-		h.timezoneName)
+		// JS variables (in script block)
+		h.timezoneName,
+		registeredPersonsJSON,
+		string(knownCarsJSON))
 }
 
 func (h *Handler) weightsAPI(w http.ResponseWriter, r *http.Request) {
@@ -1801,6 +1894,16 @@ var weightsPageTpl = `<!DOCTYPE html>
 .lang-btn:hover{background:#333}
 .tz-select{background:#252836;border:1px solid #555;color:#4fc3f7;padding:4px 8px;border-radius:6px;font-size:.8em}
 
+/* Category tabs */
+.cat-tabs{display:flex;gap:0;margin-bottom:1.2em;border-bottom:2px solid #333}
+.cat-tab{padding:.6em 1.5em;cursor:pointer;color:#888;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s;background:none;border-top:none;border-left:none;border-right:none;font-size:.95em;font-weight:bold}
+.cat-tab:hover{color:#e0e0e0}
+.cat-tab.active{color:#4fc3f7;border-bottom-color:#4fc3f7}
+.cat-tab .tab-count{background:#333;color:#888;padding:0 .5em;border-radius:8px;font-size:.8em;margin-left:.4em}
+.cat-tab.active .tab-count{background:#1976d2;color:#fff}
+.cat-content{display:none}
+.cat-content.active{display:block}
+
 /* Known identities grid */
 .ident-grid{display:flex;gap:.8em;flex-wrap:wrap;padding:.5em 0}
 .ident-card{background:#1a1d28;border:2px solid #333;border-radius:10px;padding:.6em;width:120px;text-align:center;cursor:pointer;transition:all .15s}
@@ -1816,6 +1919,7 @@ var weightsPageTpl = `<!DOCTYPE html>
 .unident-info{min-width:140px}
 .unident-time{color:#ccc;font-size:.85em}
 .unident-camera{color:#888;font-size:.8em;margin-top:2px}
+.unident-plate{color:#ff9800;font-size:.8em;margin-top:2px}
 .unident-actions{flex:1;min-width:200px}
 .suggest-label{color:#999;font-size:.8em;margin-bottom:.4em}
 .suggest-btns{display:flex;gap:.4em;flex-wrap:wrap;margin-bottom:.5em}
@@ -1823,6 +1927,8 @@ var weightsPageTpl = `<!DOCTYPE html>
 .suggest-btn:hover{background:#1976d2;color:#fff;border-color:#1976d2}
 .suggest-btn.new-btn{color:#4caf50;border-color:#4caf50}
 .suggest-btn.new-btn:hover{background:#2e7d32;color:#fff}
+.suggest-btn.exist-btn{color:#ff9800;border-color:#ff9800}
+.suggest-btn.exist-btn:hover{background:#e65100;color:#fff;border-color:#e65100}
 .suggest-weight{display:flex;align-items:center;gap:.5em;margin-top:.3em}
 .suggest-weight label{color:#888;font-size:.8em;white-space:nowrap}
 .weight-slider{width:120px;accent-color:#ff9800}
@@ -1833,18 +1939,27 @@ var weightsPageTpl = `<!DOCTYPE html>
 .btn-save-weight{background:#252836;border:1px solid #555;color:#4fc3f7;padding:3px 12px;border-radius:4px;cursor:pointer;font-size:.8em}
 .btn-save-weight:hover{background:#1976d2;color:#fff}
 
-/* New identity modal */
-.new-ident-modal-bg{display:none;position:fixed;top:0;left:0;width:100%%;height:100%%;background:rgba(0,0,0,.7);z-index:100;justify-content:center;align-items:center}
-.new-ident-modal-bg.open{display:flex}
-.new-ident-modal{background:#1a1d28;border:1px solid #333;border-radius:12px;padding:1.5em;width:400px;max-width:95vw}
-.new-ident-modal h3{margin-bottom:1em;color:#fff}
-.new-ident-modal label{display:block;color:#999;font-size:.85em;margin-top:.8em}
-.new-ident-modal input{width:100%%;padding:.5em;background:#252836;border:1px solid #444;border-radius:6px;color:#e0e0e0;font-size:.9em;margin-top:.3em}
-.new-ident-modal .actions{margin-top:1.2em;display:flex;gap:.8em;justify-content:flex-end}
-.new-ident-modal button{padding:.5em 1.2em;border-radius:6px;border:none;cursor:pointer;font-size:.9em}
-.new-ident-modal .btn-save{background:#1976d2;color:#fff}
-.new-ident-modal .btn-cancel{background:#333;color:#ccc}
-.new-ident-modal .msg{margin-top:.5em;font-size:.85em;color:#4caf50}
+/* Modal shared */
+.modal-bg{display:none;position:fixed;top:0;left:0;width:100%%;height:100%%;background:rgba(0,0,0,.7);z-index:100;justify-content:center;align-items:center}
+.modal-bg.open{display:flex}
+.modal-box{background:#1a1d28;border:1px solid #333;border-radius:12px;padding:1.5em;width:500px;max-width:95vw;max-height:80vh;overflow-y:auto}
+.modal-box h3{margin-bottom:1em;color:#fff}
+.modal-box label{display:block;color:#999;font-size:.85em;margin-top:.8em}
+.modal-box input[type=text]{width:100%%;padding:.5em;background:#252836;border:1px solid #444;border-radius:6px;color:#e0e0e0;font-size:.9em;margin-top:.3em}
+.modal-box .actions{margin-top:1.2em;display:flex;gap:.8em;justify-content:flex-end}
+.modal-box button{padding:.5em 1.2em;border-radius:6px;border:none;cursor:pointer;font-size:.9em}
+.modal-box .btn-save{background:#1976d2;color:#fff}
+.modal-box .btn-cancel{background:#333;color:#ccc}
+.modal-box .msg{margin-top:.5em;font-size:.85em;color:#4caf50}
+
+/* Registered entry picker */
+.reg-list{display:flex;flex-direction:column;gap:.4em;margin-top:.5em;max-height:250px;overflow-y:auto}
+.reg-item{display:flex;align-items:center;gap:.8em;padding:.5em .8em;background:#252836;border:1px solid #444;border-radius:8px;cursor:pointer;transition:all .15s}
+.reg-item:hover{border-color:#ff9800;background:#2a2520}
+.reg-item.selected{border-color:#ff9800;background:#3a2a10}
+.reg-item-name{color:#e0e0e0;font-weight:bold;font-size:.9em}
+.reg-item-meta{color:#888;font-size:.75em}
+.reg-item-avatar{width:36px;height:36px;border-radius:50%%;background:#374151;display:flex;align-items:center;justify-content:center;font-size:1em;color:#9ca3af;flex-shrink:0}
 
 .success-flash{animation:flash .6s ease}
 @keyframes flash{0%%{background:#1b5e20}100%%{background:transparent}}
@@ -1866,16 +1981,36 @@ var weightsPageTpl = `<!DOCTYPE html>
   <a href="/weights" class="active" data-i18n="weight_detection">Weight Detection</a>
 </div>
 
-<p style="color:#aaa;font-size:.9em;margin-bottom:1.2em" data-i18n="weight_page_desc">Suggest identities for unidentified persons. Suggested identities have lower confidence than manual annotations from the Dashboard.</p>
+<p style="color:#aaa;font-size:.9em;margin-bottom:1.2em" data-i18n="weight_page_desc">Suggest identities for unidentified detections. Choose to add as new or link to an existing registered person/car with low weight for improved accuracy. All actions are manual.</p>
 
-<div class="section">
-  <h2 data-i18n="known_identities">Known Identities</h2>
-  %s
+<!-- Category Tabs: Persons / Cars -->
+<div class="cat-tabs">
+  <button class="cat-tab active" onclick="switchCat('person')">Registered Persons <span class="tab-count" id="personCount">0</span></button>
+  <button class="cat-tab" onclick="switchCat('car')">Registered Cars <span class="tab-count" id="carCount">0</span></button>
 </div>
 
-<div class="section">
-  <h2 data-i18n="unidentified_persons">Unidentified Persons <span style="color:#888;font-weight:normal;font-size:.85em">(%d)</span></h2>
-  %s
+<!-- Person Category -->
+<div id="cat-person" class="cat-content active">
+  <div class="section">
+    <h2 data-i18n="known_identities">Known Person Identities</h2>
+    %s
+  </div>
+  <div class="section">
+    <h2>Unidentified Persons <span style="color:#888;font-weight:normal;font-size:.85em">(%d)</span></h2>
+    %s
+  </div>
+</div>
+
+<!-- Car Category -->
+<div id="cat-car" class="cat-content">
+  <div class="section">
+    <h2>Known Vehicle Identities</h2>
+    %s
+  </div>
+  <div class="section">
+    <h2>Unidentified Vehicles <span style="color:#888;font-weight:normal;font-size:.85em">(%d)</span></h2>
+    %s
+  </div>
 </div>
 
 <div class="section">
@@ -1888,12 +2023,13 @@ var weightsPageTpl = `<!DOCTYPE html>
 </div>
 
 <!-- New Identity Modal -->
-<div class="new-ident-modal-bg" id="newIdentModal">
-<div class="new-ident-modal">
-  <h3 data-i18n="add_new_identity">Add New Identity</h3>
+<div class="modal-bg" id="newIdentModal">
+<div class="modal-box">
+  <h3 id="ni-title">Add New Identity</h3>
   <input type="hidden" id="ni-event-id">
+  <input type="hidden" id="ni-category">
   <label data-i18n="identity_name">Identity (Name)</label>
-  <input type="text" id="ni-name" placeholder="e.g. John, Delivery Person">
+  <input type="text" id="ni-name" placeholder="e.g. John, Delivery Person, ABC-1234">
   <div class="suggest-weight" style="margin-top:.8em">
     <label data-i18n="confidence_level">Confidence:</label>
     <input type="range" min="10" max="90" value="50" class="weight-slider" id="ni-weight"
@@ -1901,10 +2037,35 @@ var weightsPageTpl = `<!DOCTYPE html>
     <span id="ni-wv" class="weight-val">50%%</span>
   </div>
   <div class="actions">
-    <button class="btn-cancel" onclick="closeNewIdentModal()">Cancel</button>
+    <button class="btn-cancel" onclick="closeModal('newIdentModal')">Cancel</button>
     <button class="btn-save" onclick="saveNewIdent()">Save</button>
   </div>
   <div class="msg" id="ni-msg"></div>
+</div>
+</div>
+
+<!-- Add to Existing Registered Modal -->
+<div class="modal-bg" id="existModal">
+<div class="modal-box">
+  <h3 id="ex-title">Add to Existing Registered Entry</h3>
+  <p style="color:#aaa;font-size:.85em;margin-bottom:.8em">Select a registered entry below. This will link the detection with <strong style="color:#ff9800">low weight</strong> to improve future recognition accuracy.</p>
+  <input type="hidden" id="ex-event-id">
+  <input type="hidden" id="ex-category">
+  <input type="hidden" id="ex-selected-name">
+  <div class="reg-list" id="ex-reg-list">
+    <!-- Populated by JS -->
+  </div>
+  <div class="suggest-weight" style="margin-top:.8em">
+    <label>Low-weight confidence:</label>
+    <input type="range" min="10" max="40" value="25" class="weight-slider" id="ex-weight"
+        oninput="document.getElementById('ex-wv').textContent=this.value+'%%'">
+    <span id="ex-wv" class="weight-val" style="color:#ff9800">25%%</span>
+  </div>
+  <div class="actions">
+    <button class="btn-cancel" onclick="closeModal('existModal')">Cancel</button>
+    <button class="btn-save" id="ex-save-btn" onclick="saveExistingLink()" disabled>Add with Low Weight</button>
+  </div>
+  <div class="msg" id="ex-msg"></div>
 </div>
 </div>
 
@@ -1916,6 +2077,9 @@ var weightsPageTpl = `<!DOCTYPE html>
 ` + i18nScript + `
 <script>
 var defaultTZ = '%s';
+var registeredPersons = %s;
+var knownCars = %s;
+
 function getTimezone() { return localStorage.getItem('sg_tz') || defaultTZ; }
 function setTimezone(tz) {
   localStorage.setItem('sg_tz', tz);
@@ -1926,8 +2090,27 @@ function setTimezone(tz) {
 (function() {
   var sel = document.getElementById('tzSelect');
   if (sel) sel.value = getTimezone();
+  // Set counts in tabs
+  var pc = document.querySelectorAll('#cat-person .unident-card').length;
+  var cc = document.querySelectorAll('#cat-car .unident-card').length;
+  document.getElementById('personCount').textContent = pc;
+  document.getElementById('carCount').textContent = cc;
 })();
 
+// --- Category tab switching ---
+function switchCat(cat) {
+  document.querySelectorAll('.cat-tab').forEach(function(t){ t.classList.remove('active'); });
+  document.querySelectorAll('.cat-content').forEach(function(c){ c.classList.remove('active'); });
+  document.getElementById('cat-' + cat).classList.add('active');
+  document.querySelector('.cat-tab[onclick*="' + cat + '"]').classList.add('active');
+}
+
+// --- Close any modal ---
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+
+// --- Suggest identity (quick button) ---
 function suggestIdent(eventId, identity, defaultWeight) {
   var slider = document.getElementById('weight-' + eventId);
   var weight = slider ? parseInt(slider.value) : (defaultWeight * 100);
@@ -1953,17 +2136,17 @@ function suggestIdent(eventId, identity, defaultWeight) {
   .catch(function() { alert('Network error'); });
 }
 
-function addNewIdent(eventId) {
+// --- Add New Identity modal ---
+function addNewIdent(eventId, category) {
   document.getElementById('ni-event-id').value = eventId;
+  document.getElementById('ni-category').value = category || 'person';
   document.getElementById('ni-name').value = '';
   document.getElementById('ni-weight').value = 50;
   document.getElementById('ni-wv').textContent = '50%%';
   document.getElementById('ni-msg').textContent = '';
+  var title = category === 'car' ? 'Add New Vehicle Identity' : 'Add New Person Identity';
+  document.getElementById('ni-title').textContent = title;
   document.getElementById('newIdentModal').classList.add('open');
-}
-
-function closeNewIdentModal() {
-  document.getElementById('newIdentModal').classList.remove('open');
 }
 
 function saveNewIdent() {
@@ -1985,7 +2168,7 @@ function saveNewIdent() {
     if (data.status === 'ok') {
       document.getElementById('ni-msg').style.color = '#4caf50';
       document.getElementById('ni-msg').textContent = 'Saved!';
-      setTimeout(function() { closeNewIdentModal(); location.reload(); }, 600);
+      setTimeout(function() { closeModal('newIdentModal'); location.reload(); }, 600);
     } else {
       document.getElementById('ni-msg').style.color = '#f44336';
       document.getElementById('ni-msg').textContent = 'Error: ' + (data.error || 'unknown');
@@ -1997,6 +2180,101 @@ function saveNewIdent() {
   });
 }
 
+// --- Add to Existing Registered entry modal ---
+function addToExisting(eventId, category) {
+  document.getElementById('ex-event-id').value = eventId;
+  document.getElementById('ex-category').value = category;
+  document.getElementById('ex-selected-name').value = '';
+  document.getElementById('ex-weight').value = 25;
+  document.getElementById('ex-wv').textContent = '25%%';
+  document.getElementById('ex-msg').textContent = '';
+  document.getElementById('ex-save-btn').disabled = true;
+
+  var title = category === 'car' ? 'Add to Existing Registered Car' : 'Add to Existing Registered Person';
+  document.getElementById('ex-title').textContent = title;
+
+  var listEl = document.getElementById('ex-reg-list');
+  var entries = category === 'car' ? knownCars : registeredPersons;
+
+  if (!entries || entries.length === 0) {
+    listEl.innerHTML = '<p style="color:#888;font-size:.85em;padding:.5em">No registered entries found. Use the ' +
+      (category === 'car' ? 'Dashboard to identify vehicles first.' : 'Face Gallery to register persons first.') + '</p>';
+  } else {
+    var html = '';
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      var name = e.name || e.Name || '';
+      var meta = '';
+      if (category === 'car') {
+        if (e.plate) meta += 'Plate: ' + e.plate + ' ';
+        if (e.brand) meta += e.brand;
+      } else {
+        if (e.car_plate) meta += 'Car: ' + e.car_plate + ' ';
+        if (e.room) meta += 'Room: ' + e.room;
+      }
+      var initial = name.charAt(0).toUpperCase();
+      html += '<div class="reg-item" onclick="selectRegItem(this,\'' + escapeAttr(name) + '\')">' +
+        '<div class="reg-item-avatar">' + initial + '</div>' +
+        '<div><div class="reg-item-name">' + escapeHTML(name) + '</div>' +
+        (meta ? '<div class="reg-item-meta">' + escapeHTML(meta) + '</div>' : '') +
+        '</div></div>';
+    }
+    listEl.innerHTML = html;
+  }
+
+  document.getElementById('existModal').classList.add('open');
+}
+
+function selectRegItem(el, name) {
+  // Deselect all
+  document.querySelectorAll('#ex-reg-list .reg-item').forEach(function(item){ item.classList.remove('selected'); });
+  el.classList.add('selected');
+  document.getElementById('ex-selected-name').value = name;
+  document.getElementById('ex-save-btn').disabled = false;
+}
+
+function saveExistingLink() {
+  var eventId = document.getElementById('ex-event-id').value;
+  var name = document.getElementById('ex-selected-name').value;
+  var weight = parseInt(document.getElementById('ex-weight').value);
+  if (!name) {
+    document.getElementById('ex-msg').style.color = '#f44336';
+    document.getElementById('ex-msg').textContent = 'Please select a registered entry';
+    return;
+  }
+  fetch('/api/suggest-identity', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({event_id: eventId, identity: name, weight: weight})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.status === 'ok') {
+      document.getElementById('ex-msg').style.color = '#4caf50';
+      document.getElementById('ex-msg').textContent = 'Linked with low weight! This will improve accuracy over time.';
+      setTimeout(function() { closeModal('existModal'); location.reload(); }, 800);
+    } else {
+      document.getElementById('ex-msg').style.color = '#f44336';
+      document.getElementById('ex-msg').textContent = 'Error: ' + (data.error || 'unknown');
+    }
+  })
+  .catch(function() {
+    document.getElementById('ex-msg').style.color = '#f44336';
+    document.getElementById('ex-msg').textContent = 'Network error';
+  });
+}
+
+function escapeHTML(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function escapeAttr(s) {
+  return s.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+// --- Label weights ---
 function saveLabelWeight(label, value) {
   fetch('/api/weights', {
     method: 'POST',
@@ -2017,9 +2295,11 @@ function saveLabelWeight(label, value) {
   .catch(function() { alert('Network error'); });
 }
 
-// Close modal on background click
-document.getElementById('newIdentModal').addEventListener('click', function(e) {
-  if (e.target === this) closeNewIdentModal();
+// Close modals on background click
+document.querySelectorAll('.modal-bg').forEach(function(m) {
+  m.addEventListener('click', function(e) {
+    if (e.target === this) this.classList.remove('open');
+  });
 });
 </script>
 </body>

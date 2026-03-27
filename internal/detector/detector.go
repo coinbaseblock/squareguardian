@@ -1088,6 +1088,47 @@ func (d *Detector) UnidentifiedPersonEvents(limit int) []Event {
 	return result
 }
 
+// carLabels is the set of Frigate labels treated as vehicle detections.
+var carLabels = map[string]bool{"car": true, "motorcycle": true, "bus": true, "truck": true}
+
+// IsCarLabel returns true if the label is a vehicle type.
+func IsCarLabel(label string) bool { return carLabels[label] }
+
+// KnownCarIdentities returns a map of identity name → representative car event (most recent).
+func (d *Detector) KnownCarIdentities() map[string]Event {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	result := make(map[string]Event)
+	for _, e := range d.events {
+		if !carLabels[e.Label] || e.Identity == "" {
+			continue
+		}
+		existing, exists := result[e.Identity]
+		if !exists || e.IdentityWeight > existing.IdentityWeight || (e.IdentityWeight == existing.IdentityWeight && e.StartTime > existing.StartTime) {
+			result[e.Identity] = e
+		}
+	}
+	return result
+}
+
+// UnidentifiedCarEvents returns vehicle events without identity, sorted newest first.
+func (d *Detector) UnidentifiedCarEvents(limit int) []Event {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	var result []Event
+	for _, e := range d.events {
+		if carLabels[e.Label] && e.Identity == "" {
+			result = append(result, e)
+			if limit > 0 && len(result) >= limit {
+				break
+			}
+		}
+	}
+	return result
+}
+
 // loadWeightsFromDisk loads label weights from the data directory.
 func (d *Detector) loadWeightsFromDisk() error {
 	if d.dataDir == "" {
