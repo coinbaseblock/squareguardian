@@ -62,6 +62,9 @@ func New(det *detector.Detector, cameraZones map[string]string, faceServiceURL s
 	h.mux.HandleFunc("/api/cameras", h.cameras)
 	h.mux.HandleFunc("/api/camera-snapshot/", h.cameraSnapshot)
 	h.mux.HandleFunc("/api/face/", h.faceProxy)
+	h.mux.HandleFunc("/weights", h.weightsPage)
+	h.mux.HandleFunc("/api/weights", h.weightsAPI)
+	h.mux.HandleFunc("/api/suggest-identity", h.suggestIdentity)
 	return h
 }
 
@@ -713,10 +716,191 @@ func (h *Handler) proxyFrigate(w http.ResponseWriter, path string) {
 	io.Copy(w, resp.Body)
 }
 
+func (h *Handler) weightsPage(w http.ResponseWriter, r *http.Request) {
+	loc := h.resolveTimezone(r)
+	origLoc := h.timezone
+	h.timezone = loc
+	defer func() { h.timezone = origLoc }()
+
+	// Get unidentified person events (max 50 for the page)
+	unidentified := h.det.UnidentifiedPersonEvents(50)
+
+	// Get known identities with representative thumbnails
+	knownIdents := h.det.KnownIdentities()
+
+	// Build known identity cards HTML
+	knownHTML := ""
+	if len(knownIdents) == 0 {
+		knownHTML = `<p style="color:#888;font-size:.9em" data-i18n="no_known_identities">No identified persons yet. Use the feedback button on the Dashboard to manually identify someone first.</p>`
+	} else {
+		knownHTML = `<div class="ident-grid">`
+		for name, e := range knownIdents {
+			weightLabel := "manual"
+			if e.IdentityWeight > 0 && e.IdentityWeight < 1.0 {
+				weightLabel = fmt.Sprintf("suggested %.0f%%", e.IdentityWeight*100)
+			}
+			thumbSrc := fmt.Sprintf("/api/thumbnail/%s", e.ID)
+			if e.Thumbnail != "" {
+				thumbSrc = fmt.Sprintf("data:image/jpeg;base64,%s", e.Thumbnail)
+			}
+			knownHTML += fmt.Sprintf(
+				`<div class="ident-card" data-identity="%s">
+					<img src="%s" alt="%s">
+					<div class="ident-name">%s</div>
+					<div class="ident-weight">%s</div>
+				</div>`,
+				escapeJS(name), thumbSrc, escapeJS(name), name, weightLabel)
+		}
+		knownHTML += `</div>`
+	}
+
+	// Build unidentified event cards
+	unidentHTML := ""
+	if len(unidentified) == 0 {
+		unidentHTML = `<p style="color:#888;font-size:.9em" data-i18n="no_unidentified">All person events have been identified!</p>`
+	} else {
+		unidentHTML = `<div class="unident-grid">`
+		for _, e := range unidentified {
+			t := time.Unix(int64(e.StartTime), 0).In(h.timezone)
+			ts := t.Format("2006-01-02 15:04:05")
+			thumbSrc := fmt.Sprintf("/api/thumbnail/%s", e.ID)
+			if e.Thumbnail != "" {
+				thumbSrc = fmt.Sprintf("data:image/jpeg;base64,%s", e.Thumbnail)
+			}
+			zone := h.displayZone(e)
+			if zone == "" {
+				zone = e.Camera
+			}
+
+			// Build identity option buttons
+			identBtns := ""
+			for name := range knownIdents {
+				identBtns += fmt.Sprintf(
+					`<button class="suggest-btn" onclick="suggestIdent('%s','%s',0.5)">%s</button>`,
+					e.ID, escapeJS(name), name)
+			}
+			identBtns += fmt.Sprintf(
+				`<button class="suggest-btn new-btn" onclick="addNewIdent('%s')">+ New</button>`, e.ID)
+
+			unidentHTML += fmt.Sprintf(
+				`<div class="unident-card" data-event-id="%s">
+					<img src="%s" alt="person" class="unident-thumb">
+					<div class="unident-info">
+						<div class="unident-time">%s</div>
+						<div class="unident-camera">%s · %s</div>
+					</div>
+					<div class="unident-actions">
+						<div class="suggest-label" data-i18n="who_is_this">Who is this?</div>
+						<div class="suggest-btns">%s</div>
+						<div class="suggest-weight">
+							<label data-i18n="confidence_level">Confidence:</label>
+							<input type="range" min="10" max="90" value="50" class="weight-slider" id="weight-%s"
+								oninput="document.getElementById('wv-%s').textContent=this.value+'%%'">
+							<span id="wv-%s" class="weight-val">50%%</span>
+						</div>
+					</div>
+				</div>`,
+				e.ID, thumbSrc, ts, e.Camera, zone, identBtns, e.ID, e.ID, e.ID)
+		}
+		unidentHTML += `</div>`
+	}
+
+	// Label weights section
+	labels := h.det.TrackedLabels()
+	sort.Strings(labels)
+	weights := h.det.GetWeights()
+	weightMap := make(map[string]float64)
+	for _, w := range weights {
+		weightMap[w.Label] = w.Weight
+	}
+	labelWeightRows := ""
+	for _, l := range labels {
+		w := weightMap[l]
+		pct := int(w * 100)
+		labelWeightRows += fmt.Sprintf(
+			`<tr>
+				<td>%s</td>
+				<td>
+					<input type="range" min="0" max="49" value="%d" class="label-weight-slider"
+						id="lw-%s" oninput="document.getElementById('lwv-%s').textContent=this.value+'%%'">
+					<span id="lwv-%s" class="weight-val">%d%%</span>
+				</td>
+				<td><button class="btn-save-weight" onclick="saveLabelWeight('%s',document.getElementById('lw-%s').value)" data-i18n="save">Save</button></td>
+			</tr>`,
+			labelDisplayName(l), pct, l, l, l, pct, l, l)
+	}
+
+	tzOpts := h.buildTimezoneOptions(loc.String())
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, weightsPageTpl,
+		tzOpts,
+		knownHTML,
+		len(unidentified),
+		unidentHTML,
+		labelWeightRows,
+		h.timezoneName)
+}
+
+func (h *Handler) weightsAPI(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		weights := h.det.GetWeights()
+		writeJSON(w, http.StatusOK, map[string]any{"weights": weights})
+	case http.MethodPost:
+		var req struct {
+			Label  string  `json:"label"`
+			Weight float64 `json:"weight"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+			return
+		}
+		if req.Label == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "label required"})
+			return
+		}
+		h.det.SetWeight(req.Label, req.Weight/100) // input is percentage
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *Handler) suggestIdentity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		EventID  string  `json:"event_id"`
+		Identity string  `json:"identity"`
+		Weight   float64 `json:"weight"` // 0-100 percentage
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if req.EventID == "" || req.Identity == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "event_id and identity required"})
+		return
+	}
+	weight := req.Weight / 100 // convert percentage to 0-1 range
+	if h.det.SuggestIdentity(req.EventID, req.Identity, weight) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	} else {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
+	}
+}
+
 func (h *Handler) buildEventRow(e detector.Event) string {
 	t := time.Unix(int64(e.StartTime), int64(math.Mod(e.StartTime, 1)*1e9)).In(h.timezone)
 	ts := t.Format("2006-01-02 15:04:05")
-	score := fmt.Sprintf("%.0f%%", e.TopScore*100)
+	effectiveScore := h.det.EffectiveScore(e)
+	score := fmt.Sprintf("%.0f%%", effectiveScore*100)
+	if e.TopScore == 0 && effectiveScore > 0 {
+		score += " ⚖" // weight-based indicator
+	}
 	zone := h.displayZone(e)
 	if zone == "" {
 		zone = "-"
@@ -730,6 +914,8 @@ func (h *Handler) buildEventRow(e detector.Event) string {
 	identityDisplay := e.Identity
 	if identityDisplay == "" {
 		identityDisplay = "-"
+	} else if e.IdentityWeight > 0 && e.IdentityWeight < 1.0 {
+		identityDisplay += fmt.Sprintf(` <span style="color:#ff9800;font-size:.75em">(~%.0f%%)</span>`, e.IdentityWeight*100)
 	}
 	roomDisplay := e.RoomNumber
 	if roomDisplay == "" {
@@ -920,7 +1106,20 @@ var i18n = {
     face_status_offline: "ไม่ได้เชื่อมต่อ",
     outside_person: "คนภายนอก",
     filter_by_person: "กรองตามบุคคล",
-    all_identities: "ทั้งหมด"
+    all_identities: "ทั้งหมด",
+    weight_detection: "ตรวจจับน้ำหนัก",
+    weight_detection_title: "SquareGuardian — ตรวจจับน้ำหนัก",
+    weight_page_desc: "เสนอตัวตนสำหรับบุคคลที่ยังไม่ระบุ ตัวตนที่เสนอมีน้ำหนักต่ำกว่าการระบุด้วยตนเองจาก Dashboard",
+    known_identities: "บุคคลที่รู้จัก",
+    unidentified_persons: "บุคคลที่ยังไม่ระบุตัวตน",
+    label_weights: "น้ำหนักการตรวจจับตามประเภท",
+    label_weight_desc: "ตั้งค่าน้ำหนักเริ่มต้นสำหรับแต่ละประเภท น้ำหนักเหล่านี้ต่ำกว่าคะแนนจาก Frigate เสมอ (สูงสุด 49%)",
+    who_is_this: "คนนี้คือใคร?",
+    confidence_level: "ระดับความมั่นใจ:",
+    add_new_identity: "เพิ่มตัวตนใหม่",
+    no_known_identities: "ยังไม่มีบุคคลที่ระบุตัวตน ใช้ปุ่มแก้ไขบน Dashboard เพื่อระบุตัวตนด้วยตนเองก่อน",
+    no_unidentified: "ระบุตัวตนบุคคลครบทุกคนแล้ว!",
+    weight: "น้ำหนัก"
   },
   en: {
     dashboard: "Dashboard",
@@ -984,7 +1183,20 @@ var i18n = {
     face_status_offline: "Not connected",
     outside_person: "Unknown person",
     filter_by_person: "Filter by Person",
-    all_identities: "All"
+    all_identities: "All",
+    weight_detection: "Weight Detection",
+    weight_detection_title: "SquareGuardian — Weight Detection",
+    weight_page_desc: "Suggest identities for unidentified persons. Suggested identities have lower confidence than manual annotations from the Dashboard.",
+    known_identities: "Known Identities",
+    unidentified_persons: "Unidentified Persons",
+    label_weights: "Detection Weights by Type",
+    label_weight_desc: "Set default weights for each detection type. These are always lower than Frigate's actual detection score (max 49%).",
+    who_is_this: "Who is this?",
+    confidence_level: "Confidence:",
+    add_new_identity: "Add New Identity",
+    no_known_identities: "No identified persons yet. Use the feedback button on the Dashboard to manually identify someone first.",
+    no_unidentified: "All person events have been identified!",
+    weight: "Weight"
   }
 };
 
@@ -1219,6 +1431,7 @@ var dashboardTpl = `<!DOCTYPE html>
   <a href="/" class="active" data-i18n="dashboard">Dashboard</a>
   <a href="/events" data-i18n="events_by_type">Events by Type</a>
   <a href="/faces" data-i18n="face_gallery">Face Gallery</a>
+  <a href="/weights" data-i18n="weight_detection">Weight Detection</a>
 </div>
 
 <div class="cards">
@@ -1370,6 +1583,7 @@ body.select-mode .ident-badge{left:28px}
   <a href="/" data-i18n="dashboard">Dashboard</a>
   <a href="/events" class="active" data-i18n="events_by_type">Events by Type</a>
   <a href="/faces" data-i18n="face_gallery">Face Gallery</a>
+  <a href="/weights" data-i18n="weight_detection">Weight Detection</a>
   <button class="select-toggle" id="selectToggle" onclick="toggleSelectMode()" data-i18n="select_multiple">Select Multiple</button>
 </div>
 
@@ -1569,6 +1783,243 @@ function deleteGroup(groupId) {
 // Close group modal on background click
 document.getElementById('groupModal').addEventListener('click', function(e) {
   if (e.target === this) closeGroupModal();
+});
+</script>
+</body>
+</html>`
+
+var weightsPageTpl = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SquareGuardian — Weight Detection</title>
+<style>` + sharedStyles + `
+.top-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5em;margin-bottom:.5em}
+.top-controls{display:flex;gap:.5em;align-items:center}
+.lang-btn{background:#252836;border:1px solid #555;color:#4fc3f7;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:.8em;font-weight:bold}
+.lang-btn:hover{background:#333}
+.tz-select{background:#252836;border:1px solid #555;color:#4fc3f7;padding:4px 8px;border-radius:6px;font-size:.8em}
+
+/* Known identities grid */
+.ident-grid{display:flex;gap:.8em;flex-wrap:wrap;padding:.5em 0}
+.ident-card{background:#1a1d28;border:2px solid #333;border-radius:10px;padding:.6em;width:120px;text-align:center;cursor:pointer;transition:all .15s}
+.ident-card:hover{border-color:#4fc3f7;transform:scale(1.05)}
+.ident-card img{width:100px;height:80px;object-fit:cover;border-radius:6px;display:block;margin:0 auto .4em}
+.ident-name{color:#4fc3f7;font-size:.85em;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ident-weight{color:#888;font-size:.7em;margin-top:2px}
+
+/* Unidentified events grid */
+.unident-grid{display:flex;flex-direction:column;gap:.8em}
+.unident-card{display:flex;gap:1em;background:#1a1d28;border:1px solid #333;border-radius:10px;padding:.8em;align-items:center;flex-wrap:wrap}
+.unident-thumb{width:120px;height:90px;object-fit:cover;border-radius:8px;flex-shrink:0}
+.unident-info{min-width:140px}
+.unident-time{color:#ccc;font-size:.85em}
+.unident-camera{color:#888;font-size:.8em;margin-top:2px}
+.unident-actions{flex:1;min-width:200px}
+.suggest-label{color:#999;font-size:.8em;margin-bottom:.4em}
+.suggest-btns{display:flex;gap:.4em;flex-wrap:wrap;margin-bottom:.5em}
+.suggest-btn{background:#252836;border:1px solid #555;color:#4fc3f7;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:.8em;transition:all .15s}
+.suggest-btn:hover{background:#1976d2;color:#fff;border-color:#1976d2}
+.suggest-btn.new-btn{color:#4caf50;border-color:#4caf50}
+.suggest-btn.new-btn:hover{background:#2e7d32;color:#fff}
+.suggest-weight{display:flex;align-items:center;gap:.5em;margin-top:.3em}
+.suggest-weight label{color:#888;font-size:.8em;white-space:nowrap}
+.weight-slider{width:120px;accent-color:#ff9800}
+.weight-val{color:#ff9800;font-size:.8em;font-weight:bold;min-width:35px}
+
+/* Label weight table */
+.label-weight-slider{width:120px;accent-color:#4fc3f7}
+.btn-save-weight{background:#252836;border:1px solid #555;color:#4fc3f7;padding:3px 12px;border-radius:4px;cursor:pointer;font-size:.8em}
+.btn-save-weight:hover{background:#1976d2;color:#fff}
+
+/* New identity modal */
+.new-ident-modal-bg{display:none;position:fixed;top:0;left:0;width:100%%;height:100%%;background:rgba(0,0,0,.7);z-index:100;justify-content:center;align-items:center}
+.new-ident-modal-bg.open{display:flex}
+.new-ident-modal{background:#1a1d28;border:1px solid #333;border-radius:12px;padding:1.5em;width:400px;max-width:95vw}
+.new-ident-modal h3{margin-bottom:1em;color:#fff}
+.new-ident-modal label{display:block;color:#999;font-size:.85em;margin-top:.8em}
+.new-ident-modal input{width:100%%;padding:.5em;background:#252836;border:1px solid #444;border-radius:6px;color:#e0e0e0;font-size:.9em;margin-top:.3em}
+.new-ident-modal .actions{margin-top:1.2em;display:flex;gap:.8em;justify-content:flex-end}
+.new-ident-modal button{padding:.5em 1.2em;border-radius:6px;border:none;cursor:pointer;font-size:.9em}
+.new-ident-modal .btn-save{background:#1976d2;color:#fff}
+.new-ident-modal .btn-cancel{background:#333;color:#ccc}
+.new-ident-modal .msg{margin-top:.5em;font-size:.85em;color:#4caf50}
+
+.success-flash{animation:flash .6s ease}
+@keyframes flash{0%%{background:#1b5e20}100%%{background:transparent}}
+</style>
+</head>
+<body>
+<div class="top-bar">
+  <h1 data-i18n="weight_detection_title">SquareGuardian — Weight Detection</h1>
+  <div class="top-controls">
+    <span style="color:#888;font-size:.8em" data-i18n="timezone">Timezone</span>
+    <select class="tz-select" id="tzSelect" onchange="setTimezone(this.value)">%s</select>
+    <button class="lang-btn" id="langToggle" onclick="toggleLang()">TH</button>
+  </div>
+</div>
+<div class="nav">
+  <a href="/" data-i18n="dashboard">Dashboard</a>
+  <a href="/events" data-i18n="events_by_type">Events by Type</a>
+  <a href="/faces" data-i18n="face_gallery">Face Gallery</a>
+  <a href="/weights" class="active" data-i18n="weight_detection">Weight Detection</a>
+</div>
+
+<p style="color:#aaa;font-size:.9em;margin-bottom:1.2em" data-i18n="weight_page_desc">Suggest identities for unidentified persons. Suggested identities have lower confidence than manual annotations from the Dashboard.</p>
+
+<div class="section">
+  <h2 data-i18n="known_identities">Known Identities</h2>
+  %s
+</div>
+
+<div class="section">
+  <h2 data-i18n="unidentified_persons">Unidentified Persons <span style="color:#888;font-weight:normal;font-size:.85em">(%d)</span></h2>
+  %s
+</div>
+
+<div class="section">
+  <h2 data-i18n="label_weights">Detection Weights by Type</h2>
+  <p style="color:#888;font-size:.8em;margin-bottom:.5em" data-i18n="label_weight_desc">Set default weights for each detection type. These are always lower than Frigate's actual detection score (max 49%%).</p>
+  <table>
+    <tr><th data-i18n="type_col">Type</th><th data-i18n="weight">Weight</th><th></th></tr>
+    %s
+  </table>
+</div>
+
+<!-- New Identity Modal -->
+<div class="new-ident-modal-bg" id="newIdentModal">
+<div class="new-ident-modal">
+  <h3 data-i18n="add_new_identity">Add New Identity</h3>
+  <input type="hidden" id="ni-event-id">
+  <label data-i18n="identity_name">Identity (Name)</label>
+  <input type="text" id="ni-name" placeholder="e.g. John, Delivery Person">
+  <div class="suggest-weight" style="margin-top:.8em">
+    <label data-i18n="confidence_level">Confidence:</label>
+    <input type="range" min="10" max="90" value="50" class="weight-slider" id="ni-weight"
+        oninput="document.getElementById('ni-wv').textContent=this.value+'%%'">
+    <span id="ni-wv" class="weight-val">50%%</span>
+  </div>
+  <div class="actions">
+    <button class="btn-cancel" onclick="closeNewIdentModal()">Cancel</button>
+    <button class="btn-save" onclick="saveNewIdent()">Save</button>
+  </div>
+  <div class="msg" id="ni-msg"></div>
+</div>
+</div>
+
+<div class="links" style="margin-top:2em">
+  <a href="/" data-i18n="dashboard">Dashboard</a>
+  <a href="/api/weights">API: Weights</a>
+</div>
+
+` + i18nScript + `
+<script>
+var defaultTZ = '%s';
+function getTimezone() { return localStorage.getItem('sg_tz') || defaultTZ; }
+function setTimezone(tz) {
+  localStorage.setItem('sg_tz', tz);
+  var url = new URL(window.location);
+  url.searchParams.set('tz', tz);
+  window.location = url;
+}
+(function() {
+  var sel = document.getElementById('tzSelect');
+  if (sel) sel.value = getTimezone();
+})();
+
+function suggestIdent(eventId, identity, defaultWeight) {
+  var slider = document.getElementById('weight-' + eventId);
+  var weight = slider ? parseInt(slider.value) : (defaultWeight * 100);
+  fetch('/api/suggest-identity', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({event_id: eventId, identity: identity, weight: weight})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.status === 'ok') {
+      var card = document.querySelector('.unident-card[data-event-id="' + eventId + '"]');
+      if (card) {
+        card.classList.add('success-flash');
+        card.querySelector('.suggest-label').textContent = '✓ ' + identity + ' (' + weight + '%%)';
+        card.querySelector('.suggest-btns').style.display = 'none';
+        card.querySelector('.suggest-weight').style.display = 'none';
+      }
+    } else {
+      alert('Error: ' + (data.error || 'unknown'));
+    }
+  })
+  .catch(function() { alert('Network error'); });
+}
+
+function addNewIdent(eventId) {
+  document.getElementById('ni-event-id').value = eventId;
+  document.getElementById('ni-name').value = '';
+  document.getElementById('ni-weight').value = 50;
+  document.getElementById('ni-wv').textContent = '50%%';
+  document.getElementById('ni-msg').textContent = '';
+  document.getElementById('newIdentModal').classList.add('open');
+}
+
+function closeNewIdentModal() {
+  document.getElementById('newIdentModal').classList.remove('open');
+}
+
+function saveNewIdent() {
+  var eventId = document.getElementById('ni-event-id').value;
+  var name = document.getElementById('ni-name').value.trim();
+  var weight = parseInt(document.getElementById('ni-weight').value);
+  if (!name) {
+    document.getElementById('ni-msg').style.color = '#f44336';
+    document.getElementById('ni-msg').textContent = 'Please enter a name';
+    return;
+  }
+  fetch('/api/suggest-identity', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({event_id: eventId, identity: name, weight: weight})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.status === 'ok') {
+      document.getElementById('ni-msg').style.color = '#4caf50';
+      document.getElementById('ni-msg').textContent = 'Saved!';
+      setTimeout(function() { closeNewIdentModal(); location.reload(); }, 600);
+    } else {
+      document.getElementById('ni-msg').style.color = '#f44336';
+      document.getElementById('ni-msg').textContent = 'Error: ' + (data.error || 'unknown');
+    }
+  })
+  .catch(function() {
+    document.getElementById('ni-msg').style.color = '#f44336';
+    document.getElementById('ni-msg').textContent = 'Network error';
+  });
+}
+
+function saveLabelWeight(label, value) {
+  fetch('/api/weights', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({label: label, weight: parseInt(value)})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.status === 'ok') {
+      var btn = event.target;
+      btn.textContent = '✓';
+      btn.style.color = '#4caf50';
+      setTimeout(function() { btn.textContent = 'Save'; btn.style.color = ''; }, 1000);
+    } else {
+      alert('Error: ' + (data.error || 'unknown'));
+    }
+  })
+  .catch(function() { alert('Network error'); });
+}
+
+// Close modal on background click
+document.getElementById('newIdentModal').addEventListener('click', function(e) {
+  if (e.target === this) closeNewIdentModal();
 });
 </script>
 </body>

@@ -60,6 +60,7 @@ func (h *Handler) facesPage(w http.ResponseWriter, r *http.Request) {
 	navHTML := `<a href="/" class="nav-link" data-i18n="dashboard">Dashboard</a>` +
 		`<a href="/events" class="nav-link" data-i18n="events_by_type">Events</a>` +
 		`<a href="/faces" class="nav-link active" data-i18n="face_gallery">Face Gallery</a>` +
+		`<a href="/weights" class="nav-link" data-i18n="weight_detection">Weight Detection</a>` +
 		`<button class="lang-btn" id="langToggle" onclick="toggleLang()" style="margin-left:auto;background:#252836;border:1px solid #555;color:#4fc3f7;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:.8em;font-weight:bold">TH</button>`
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

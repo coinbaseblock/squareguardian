@@ -48,6 +48,9 @@ type Detector struct {
 	burstCount    int
 	burstInterval time.Duration
 
+	// Label weights for detection boost (user-configured)
+	labelWeights map[string]float64
+
 	// Alert cooldown: camera:identity → last alert time
 	cooldownMu  sync.RWMutex
 	alertCooldown map[string]time.Time
@@ -89,6 +92,7 @@ func New(frigateURL string, trackedItems []string, pollInterval time.Duration, d
 		faceClient:    NewFaceClient(faceServiceURL),
 		burstCount:    burstCount,
 		burstInterval: time.Duration(burstIntervalMS) * time.Millisecond,
+		labelWeights:  make(map[string]float64),
 		alertCooldown: make(map[string]time.Time),
 		cooldownDur:   time.Duration(alertCooldownSec) * time.Second,
 		stopCh:        make(chan struct{}),
@@ -101,6 +105,9 @@ func (d *Detector) Start() {
 		log.Printf("detector: load from disk: %v (starting fresh)", err)
 	} else {
 		log.Printf("detector: loaded %d events from disk", len(d.events))
+	}
+	if err := d.loadWeightsFromDisk(); err != nil {
+		log.Printf("detector: load weights: %v", err)
 	}
 
 	log.Printf("detector: polling %s every %s for items: %v",
@@ -257,6 +264,7 @@ func (d *Detector) Annotate(eventID, identity, roomNumber, licensePlate, provinc
 		if d.events[i].ID == eventID {
 			if identity != "" {
 				d.events[i].Identity = identity
+				d.events[i].IdentityWeight = 1.0 // manual annotation = full weight
 			}
 			if roomNumber != "" {
 				d.events[i].RoomNumber = roomNumber
@@ -965,4 +973,169 @@ func (d *Detector) checkDiskUsage() {
 	if err := d.saveToDisk(); err != nil {
 		log.Printf("detector: save after cleanup error: %v", err)
 	}
+}
+
+// GetWeights returns all configured label weights.
+func (d *Detector) GetWeights() []LabelWeight {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	var weights []LabelWeight
+	for label, w := range d.labelWeights {
+		weights = append(weights, LabelWeight{Label: label, Weight: w})
+	}
+	sort.Slice(weights, func(i, j int) bool {
+		return weights[i].Label < weights[j].Label
+	})
+	return weights
+}
+
+// GetWeight returns the configured weight for a specific label.
+func (d *Detector) GetWeight(label string) float64 {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.labelWeights[label]
+}
+
+// SetWeight sets the detection weight for a label and persists to disk.
+func (d *Detector) SetWeight(label string, weight float64) {
+	if weight < 0 {
+		weight = 0
+	}
+	if weight > 1 {
+		weight = 1
+	}
+	d.mu.Lock()
+	d.labelWeights[label] = weight
+	d.mu.Unlock()
+	d.saveWeightsToDisk()
+}
+
+// EffectiveScore returns the display score for an event.
+// If Frigate provided a TopScore > 0, that is used directly.
+// Otherwise, the user-configured label weight is used as a fallback,
+// but always capped below any real Frigate score (max 0.49 from weights).
+func (d *Detector) EffectiveScore(e Event) float64 {
+	if e.TopScore > 0 {
+		return e.TopScore
+	}
+	d.mu.RLock()
+	w := d.labelWeights[e.Label]
+	d.mu.RUnlock()
+	// Cap weight-based score at 0.49 so it's always less than a real detection
+	if w > 0.49 {
+		return 0.49
+	}
+	return w
+}
+
+// SuggestIdentity sets the identity on an event with a weight lower than manual (1.0).
+// This is used from the weight detection page where users pick a likely match.
+func (d *Detector) SuggestIdentity(eventID, identity string, weight float64) bool {
+	if weight <= 0 {
+		weight = 0.5
+	}
+	if weight > 0.9 {
+		weight = 0.9 // always less than manual (1.0)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for i := range d.events {
+		if d.events[i].ID == eventID {
+			d.events[i].Identity = identity
+			d.events[i].IdentityWeight = weight
+			d.dirty = true
+			return true
+		}
+	}
+	return false
+}
+
+// KnownIdentities returns a map of identity name → representative event (most recent)
+// for all person events that have been manually identified (weight >= 1.0 or set via feedback).
+func (d *Detector) KnownIdentities() map[string]Event {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	result := make(map[string]Event)
+	for _, e := range d.events {
+		if e.Label != "person" || e.Identity == "" {
+			continue
+		}
+		// Prefer events with higher identity weight (manual > suggested)
+		existing, exists := result[e.Identity]
+		if !exists || e.IdentityWeight > existing.IdentityWeight || (e.IdentityWeight == existing.IdentityWeight && e.StartTime > existing.StartTime) {
+			result[e.Identity] = e
+		}
+	}
+	return result
+}
+
+// UnidentifiedPersonEvents returns person events without identity, sorted newest first.
+func (d *Detector) UnidentifiedPersonEvents(limit int) []Event {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	var result []Event
+	for _, e := range d.events {
+		if e.Label == "person" && e.Identity == "" {
+			result = append(result, e)
+			if limit > 0 && len(result) >= limit {
+				break
+			}
+		}
+	}
+	return result
+}
+
+// loadWeightsFromDisk loads label weights from the data directory.
+func (d *Detector) loadWeightsFromDisk() error {
+	if d.dataDir == "" {
+		return nil
+	}
+	filePath := filepath.Join(d.dataDir, "weights.json")
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read %s: %w", filePath, err)
+	}
+	var weights []LabelWeight
+	if err := json.Unmarshal(data, &weights); err != nil {
+		return fmt.Errorf("unmarshal weights: %w", err)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, w := range weights {
+		d.labelWeights[w.Label] = w.Weight
+	}
+	log.Printf("detector: loaded %d label weights from disk", len(weights))
+	return nil
+}
+
+// saveWeightsToDisk persists label weights to the data directory.
+func (d *Detector) saveWeightsToDisk() error {
+	if d.dataDir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(d.dataDir, 0755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", d.dataDir, err)
+	}
+
+	weights := d.GetWeights()
+	data, err := json.Marshal(weights)
+	if err != nil {
+		return fmt.Errorf("marshal weights: %w", err)
+	}
+	filePath := filepath.Join(d.dataDir, "weights.json")
+	tmpPath := filePath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return fmt.Errorf("write %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		return fmt.Errorf("rename %s: %w", filePath, err)
+	}
+	log.Printf("detector: saved %d label weights to disk", len(weights))
+	return nil
 }

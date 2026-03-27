@@ -14,8 +14,9 @@ type Event struct {
 	Snapshot  string  `json:"snapshot,omitempty"`
 
 	// User-provided annotations
-	Identity     string `json:"identity,omitempty"`      // e.g. person name
-	RoomNumber   string `json:"room_number,omitempty"`   // e.g. A0213
+	Identity       string  `json:"identity,omitempty"`        // e.g. person name
+	IdentityWeight float64 `json:"identity_weight,omitempty"` // 1.0=manual, <1.0=suggested
+	RoomNumber     string  `json:"room_number,omitempty"`     // e.g. A0213
 	LicensePlate string `json:"license_plate,omitempty"` // e.g. ABC 1234
 	Province     string `json:"province,omitempty"`      // e.g. Bangkok
 	VehicleBrand string `json:"vehicle_brand,omitempty"` // e.g. Toyota Camry
@@ -34,6 +35,14 @@ type EventGroup struct {
 	Label    string `json:"label"`     // person, car, etc.
 	EventIDs []string `json:"event_ids"`
 	CreatedAt float64 `json:"created_at"`
+}
+
+// LabelWeight represents a user-configured detection weight for a label type.
+// These weights are applied as a boost to detection confidence but are always
+// capped below the actual Frigate detection score (TopScore).
+type LabelWeight struct {
+	Label  string  `json:"label"`
+	Weight float64 `json:"weight"` // 0.0 – 1.0
 }
 
 // FrigateEvent is the raw event structure returned by Frigate API.
