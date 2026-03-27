@@ -18,9 +18,9 @@ import face_engine
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = os.getenv("MODEL_NAME", "buffalo_s")
-MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.55"))
-SUGGEST_THRESHOLD = float(os.getenv("SUGGEST_THRESHOLD", "0.45"))
+MODEL_NAME = os.getenv("MODEL_NAME", "buffalo_l")
+MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.50"))
+SUGGEST_THRESHOLD = float(os.getenv("SUGGEST_THRESHOLD", "0.40"))
 
 
 @asynccontextmanager
