@@ -26,6 +26,8 @@ CONFIG_FILE="${CONFIG_DIR}/config.yml"
 DETECT_WIDTH="${FRIGATE_DETECT_WIDTH:-1280}"
 DETECT_HEIGHT="${FRIGATE_DETECT_HEIGHT:-720}"
 DETECT_FPS="${FRIGATE_DETECT_FPS:-15}"
+MQTT_HOST="${FRIGATE_MQTT_HOST:-mosquitto}"
+MQTT_PORT="${FRIGATE_MQTT_PORT:-1883}"
 
 # Discover cameras from environment variables matching CAMERA_*_RTSP_URL
 # Only include cameras whose URL is non-empty.
@@ -54,7 +56,10 @@ if [ -z "$CAMERAS" ]; then
 # No cameras configured — add CAMERA_*_RTSP_URL env vars and restart.
 
 mqtt:
-  enabled: false
+  enabled: true
+  host: ${MQTT_HOST}
+  port: ${MQTT_PORT}
+  topic_prefix: frigate
 
 tls:
   enabled: false
@@ -209,7 +214,11 @@ cat > "$CONFIG_FILE" <<ENDCONFIG
 # Configure cameras via CAMERA_*_RTSP_URL environment variables in .env.
 
 mqtt:
-  enabled: false
+  enabled: true
+  host: ${MQTT_HOST}
+  port: ${MQTT_PORT}
+  topic_prefix: frigate
+  stats_interval: 60
 
 tls:
   enabled: false

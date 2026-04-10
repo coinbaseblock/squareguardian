@@ -1,4 +1,22 @@
 services:
+  # ─── MQTT Broker ───────────────────────────────────────────────
+  mosquitto:
+    container_name: squareguardian-mqtt
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./config/mosquitto:/mosquitto/config:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/broker/uptime' -C 1 -W 3"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Frigate NVR ───────────────────────────────────────────────
   frigate:
     container_name: squareguardian-frigate
     image: ghcr.io/blakeblackshear/frigate:stable
@@ -17,33 +35,93 @@ services:
       start_period: 30s
     ports:
       - "8971:8971"
-      # Keep Frigate UI on 8971. Expose the internal API on 5001 so it is
-      # harder to accidentally browse the UI through port 5000, which can
-      # break image rendering in Explore on some local setups.
       - "5001:5000"
       - "8554:8554"
       - "8555:8555/tcp"
       - "8555:8555/udp"
-      # Optional go2rtc debug UI / stream inspector.
       - "1984:1984"
     env_file:
       - .env
     environment:
-      # All CAMERA_* env vars are auto-discovered from .env file.
-      # No need to hardcode camera names here — just add CAMERA_<NAME>_RTSP_URL
-      # in .env and restart. The entrypoint script discovers them automatically.
       FRIGATE_DETECT_WIDTH: ${FRIGATE_DETECT_WIDTH:-1280}
       FRIGATE_DETECT_HEIGHT: ${FRIGATE_DETECT_HEIGHT:-720}
       FRIGATE_DETECT_FPS: ${FRIGATE_DETECT_FPS:-15}
+      FRIGATE_MQTT_HOST: mosquitto
+      FRIGATE_MQTT_PORT: "1883"
       TZ: ${FRIGATE_TIMEZONE:-Asia/Bangkok}
     volumes:
       - ./config/frigate:/config
       - ./scripts/generate-frigate-config.sh:/config/scripts/generate-frigate-config.sh:ro
       - ./storage/frigate:/media/frigate
       - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
 
+  # ─── CompreFace (Face Identification) ──────────────────────────
+  compreface-postgres:
+    container_name: squareguardian-compreface-db
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: compreface
+      POSTGRES_PASSWORD: ${COMPREFACE_DB_PASSWORD:-compreface}
+      POSTGRES_DB: compreface
+    volumes:
+      - compreface-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U compreface"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  compreface-core:
+    container_name: squareguardian-compreface-core
+    image: exadel/compreface-core:1.2.0
+    restart: unless-stopped
+    environment:
+      ML_PORT: "3000"
+
+  compreface-api:
+    container_name: squareguardian-compreface-api
+    image: exadel/compreface-api:1.2.0
+    restart: unless-stopped
+    depends_on:
+      compreface-postgres:
+        condition: service_healthy
+      compreface-core:
+        condition: service_started
+    environment:
+      POSTGRES_URL: jdbc:postgresql://compreface-postgres:5432/compreface
+      POSTGRES_USER: compreface
+      POSTGRES_PASSWORD: ${COMPREFACE_DB_PASSWORD:-compreface}
+      SPRING_PROFILES_ACTIVE: dev
+      EXTERNAL_DB: "true"
+      # The core ML service endpoint
+      CONNECTION_TIMEOUT: "10000"
+      READ_TIMEOUT: "60000"
+
+  compreface-admin:
+    container_name: squareguardian-compreface-admin
+    image: exadel/compreface-admin:1.2.0
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    depends_on:
+      compreface-postgres:
+        condition: service_healthy
+      compreface-api:
+        condition: service_started
+    environment:
+      POSTGRES_URL: jdbc:postgresql://compreface-postgres:5432/compreface
+      POSTGRES_USER: compreface
+      POSTGRES_PASSWORD: ${COMPREFACE_DB_PASSWORD:-compreface}
+      EXTERNAL_DB: "true"
+      ADMIN_KEY: ${COMPREFACE_ADMIN_KEY:-admin-api-key-change-me}
+
+  # ─── SquareGuardian Event Engine ───────────────────────────────
   squareguardian:
-    container_name: squareguardian-detector
+    container_name: squareguardian-engine
     build:
       context: .
       target: runtime
@@ -59,22 +137,64 @@ services:
       MAX_STORAGE_GB: ${MAX_STORAGE_GB:-256}
       BUFFER_GB: ${BUFFER_GB:-10}
       SAVE_INTERVAL_SEC: ${SAVE_INTERVAL_SEC:-30}
-      FACE_SERVICE_URL: ${FACE_SERVICE_URL:-http://face-service:8082}
+      # MQTT
+      MQTT_BROKER: tcp://mosquitto:1883
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-frigate}
+      # CompreFace
+      COMPREFACE_URL: http://compreface-api:8000
+      COMPREFACE_API_KEY: ${COMPREFACE_RECOGNITION_KEY:-}
+      COMPREFACE_THRESHOLD: ${COMPREFACE_THRESHOLD:-0.90}
+      # Legacy face service (kept for backward compat, optional)
+      FACE_SERVICE_URL: ${FACE_SERVICE_URL:-}
+      # SQLite
+      SQLITE_PATH: /data/squareguardian.db
+      # Notifications
+      LINE_NOTIFY_TOKEN: ${LINE_NOTIFY_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+      ALERT_COOLDOWN_SEC: ${ALERT_COOLDOWN_SEC:-300}
     volumes:
       - ./storage/events:/data/events
+      - ./storage/db:/data
       - ./config/frigate:/config:ro
     depends_on:
       frigate:
         condition: service_healthy
-      face-service:
+      mosquitto:
         condition: service_healthy
 
+  # ─── Action Recognition Service ─────────────────────────────────
+  action-recognition:
+    container_name: squareguardian-action
+    build:
+      context: ./services/action-recognition
+    restart: unless-stopped
+    profiles:
+      - action
+    ports:
+      - "8083:8083"
+    environment:
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_TOPIC: squareguardian/actions
+      PROCESS_FPS: ${ACTION_PROCESS_FPS:-5}
+      CONFIDENCE_THRESHOLD: ${ACTION_CONFIDENCE_THRESHOLD:-0.5}
+      # Comma-separated RTSP URLs from go2rtc restream
+      RTSP_URLS: ${ACTION_RTSP_URLS:-}
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+
+  # ─── Legacy Face Service (optional, disable if using CompreFace only) ──
   face-service:
     container_name: squareguardian-face
     build:
       context: ./services/face
       dockerfile: Dockerfile
     restart: unless-stopped
+    profiles:
+      - legacy-face
     ports:
       - "8082:8082"
     volumes:
@@ -90,3 +210,8 @@ services:
       timeout: 5s
       retries: 6
       start_period: 60s
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:
+  compreface-pg:
