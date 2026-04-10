@@ -30,8 +30,20 @@ type Config struct {
 	BufferGB      int // keep this much free space when cleaning (default 10)
 	SaveIntervalS int // how often to save to disk in seconds (default 30)
 
-	// Face service
+	// Legacy face service (optional, kept for backward compat)
 	FaceServiceURL string
+
+	// CompreFace
+	CompreFaceURL       string
+	CompreFaceAPIKey    string
+	CompreFaceThreshold float64
+
+	// MQTT
+	MQTTBroker      string
+	MQTTTopicPrefix string
+
+	// SQLite
+	SQLitePath string
 
 	// Snapshot burst: capture multiple snapshots and pick the sharpest one
 	SnapshotBurstCount      int // number of snapshots per event (default 3)
@@ -39,6 +51,12 @@ type Config struct {
 
 	// Alert cooldown: avoid re-alerting for the same person on the same camera
 	AlertCooldownSec int // seconds to suppress duplicate alerts (default 300 = 5 min)
+
+	// Notifications
+	LINENotifyToken  string
+	TelegramBotToken string
+	TelegramChatID   string
+	WebhookURL       string
 
 	// Timezone for display (default Asia/Bangkok)
 	Timezone string
@@ -60,9 +78,19 @@ func Load() *Config {
 		BufferGB:               getInt("BUFFER_GB", 10),
 		SaveIntervalS:          getInt("SAVE_INTERVAL_SEC", 30),
 		FaceServiceURL:         getEnv("FACE_SERVICE_URL", ""),
+		CompreFaceURL:          getEnv("COMPREFACE_URL", ""),
+		CompreFaceAPIKey:       getEnv("COMPREFACE_API_KEY", ""),
+		CompreFaceThreshold:    getFloat("COMPREFACE_THRESHOLD", 0.90),
+		MQTTBroker:             getEnv("MQTT_BROKER", "tcp://mosquitto:1883"),
+		MQTTTopicPrefix:        getEnv("MQTT_TOPIC_PREFIX", "frigate"),
+		SQLitePath:             getEnv("SQLITE_PATH", "/data/squareguardian.db"),
 		SnapshotBurstCount:     getInt("SNAPSHOT_BURST_COUNT", 3),
 		SnapshotBurstIntervalMS: getInt("SNAPSHOT_BURST_INTERVAL_MS", 500),
 		AlertCooldownSec:       getInt("ALERT_COOLDOWN_SEC", 300),
+		LINENotifyToken:        getEnv("LINE_NOTIFY_TOKEN", ""),
+		TelegramBotToken:       getEnv("TELEGRAM_BOT_TOKEN", ""),
+		TelegramChatID:         getEnv("TELEGRAM_CHAT_ID", ""),
+		WebhookURL:             getEnv("WEBHOOK_URL", ""),
 		Timezone:               getEnv("FRIGATE_TIMEZONE", "Asia/Bangkok"),
 	}
 }
@@ -90,6 +118,15 @@ func getDuration(key string, fallbackSec int) time.Duration {
 		}
 	}
 	return time.Duration(fallbackSec) * time.Second
+}
+
+func getFloat(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+	}
+	return fallback
 }
 
 func getList(key string, fallback []string) []string {

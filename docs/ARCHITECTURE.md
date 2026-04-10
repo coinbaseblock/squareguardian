@@ -2,102 +2,142 @@
 
 ## ภาพรวม
 
-`SquareGuardian` เริ่มจากสถาปัตยกรรมเล็กที่สุดที่ยังใช้งานจริงได้กับ local pilot 1 กล้องก่อน แล้วค่อยแยก layer เพิ่มเมื่อมีความจำเป็น.
+`SquareGuardian` เป็นระบบ AI Video Intelligence แบบ self-hosted ที่ตอบคำถาม **Who, What, Where, When** จากกล้อง RTSP/IP ได้แบบ real-time
 
-## สถาปัตยกรรม MVP ที่ใช้ตอนนี้
+## System Architecture
 
 ```text
-TP-Link Tapo RTSP Camera
-  -> Frigate
-  -> Detection Event
-  -> Zone Filter
-  -> Snapshot / Review
-  -> UI
+┌─────────────┐     RTSP      ┌──────────────┐   MQTT Events   ┌─────────────────────┐
+│ IP Cameras  │──────────────>│   Frigate    │───────────────>│  SquareGuardian     │
+│ (1-4 cams)  │               │   (NVR)      │                │  Event Engine (Go)  │
+└─────────────┘               └──────┬───────┘                └──────┬──────────────┘
+                                     │                                │
+                              ┌──────┴───────┐               ┌───────┴────────┐
+                              │  go2rtc      │               │                │
+                              │  (restream)  │               │  SQLite DB     │
+                              └──────┬───────┘               │  (events,      │
+                                     │                        │   persons,     │
+                              RTSP restream                   │   vehicles)    │
+                                     │                        └───────┬────────┘
+                              ┌──────┴───────┐                        │
+                              │  Action      │                ┌───────┴────────┐
+                              │  Recognition │                │  REST API      │
+                              │  (Python)    │                │  + WebSocket   │
+                              └──────────────┘                └───────┬────────┘
+                                                                      │
+┌─────────────┐                                               ┌───────┴────────┐
+│ CompreFace  │<──── face crop ─────── SquareGuardian ──────>│  Notifications │
+│ (Face ID)   │                        Engine                 │  LINE/Telegram │
+└─────────────┘                                               │  /Webhook      │
+                                                              └────────────────┘
+                              ┌──────────────┐
+                              │  Mosquitto   │
+                              │  MQTT Broker │
+                              └──────────────┘
 ```
 
-## Layer ที่ควรมีในรอบแรก
+## Service Breakdown
 
-### 1. Detection Layer
+| Service | Image/Build | Port | Role |
+|---------|------------|------|------|
+| **mosquitto** | `eclipse-mosquitto:2` | 1883 | MQTT broker สำหรับ event communication |
+| **frigate** | `ghcr.io/blakeblackshear/frigate:stable` | 8971, 5001, 8554 | NVR + object detection (person, vehicle) |
+| **compreface-core** | `exadel/compreface-core:1.2.0` | - | Face recognition ML engine |
+| **compreface-api** | `exadel/compreface-api:1.2.0` | - | CompreFace REST API |
+| **compreface-admin** | `exadel/compreface-admin:1.2.0` | 8000 | CompreFace admin UI |
+| **compreface-postgres** | `postgres:16-alpine` | - | CompreFace database |
+| **squareguardian** | Build from `./` | 8080 | Central Event Engine (Go) |
+| **action-recognition** | Build from `./services/action-recognition` | 8083 | Skeleton-based action classification |
+| **face-service** | Build from `./services/face` | 8082 | Legacy face service (optional) |
 
-หน้าที่:
+## Data Flow Pipeline
 
-- รับ RTSP
-- detect `person` และ `vehicle`
-- ส่ง event พื้นฐานไปยัง review/UI
+```text
+1. กล้อง RTSP → Frigate (detect person/car/motorcycle)
+2. Frigate → MQTT event → SquareGuardian Engine
+3. Engine receives event:
+   a. If person detected + has snapshot:
+      → Fetch snapshot from Frigate
+      → Send to CompreFace → Get face match (Who)
+   b. Action Recognition service (parallel):
+      → Reads RTSP restream from go2rtc
+      → Pose estimation (MediaPipe) → Skeleton → Classify action (What)
+      → Publish action event to MQTT
+   c. Engine correlates:
+      → Who (CompreFace match) + What (action) + Where (camera/zone) + When (timestamp)
+      → Store unified event in SQLite
+      → Broadcast via WebSocket to dashboard
+      → Evaluate alert rules → Send notifications
+```
 
-เครื่องมือเริ่มต้น:
+## Event Schema (unified)
 
-- Frigate
-- go2rtc restream สำหรับแยก stream ตรวจจับออกจาก stream live view ที่ browser เล่นได้ง่ายกว่า
+```json
+{
+  "id": "1234567890.abcdef",
+  "frigate_id": "1234567890.abcdef",
+  "camera": "cam_front",
+  "label": "person",
+  "top_score": 0.92,
+  "start_time": "2026-04-10T22:14:00Z",
+  "end_time": "2026-04-10T22:14:30Z",
+  "zone": "front_door",
+  "person_id": "p001",
+  "person_name": "Somchai",
+  "face_score": 0.95,
+  "action": "walk",
+  "action_score": 0.87,
+  "vehicle_id": "",
+  "plate": "",
+  "snapshot_path": "/api/events/1234567890.abcdef/snapshot.jpg",
+  "alert_sent": false,
+  "alert_type": "",
+  "created_at": "2026-04-10T22:14:00.123Z"
+}
+```
 
-สถานะ:
+## API Endpoints
 
-- **ทำจริงทันที**
+### V2 API (Event Engine — MQTT + SQLite)
 
-### 2. Rule / Zone Layer
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v2/events?camera=&label=&limit=&offset=` | Query unified events |
+| GET | `/api/v2/events/{id}` | Get single event |
+| GET | `/api/v2/persons` | List registered persons |
+| POST | `/api/v2/persons` | Register a person |
+| GET | `/api/v2/vehicles` | List registered vehicles |
+| POST | `/api/v2/vehicles` | Register a vehicle |
+| GET | `/api/v2/stats` | Event count + WebSocket connections |
+| WS | `/ws` | Real-time event stream (WebSocket) |
 
-หน้าที่:
+### V1 API (Legacy polling-based — backward compatible)
 
-- กรองเฉพาะพื้นที่ที่สนใจ
-- แยก `front-door`, `gate`, `parking`
-- ลด noise จากพื้นที่ที่ไม่ต้องการ
+เดิมที่มีอยู่ยังใช้งานได้ปกติ
 
-สถานะ:
+## Module Responsibilities
 
-- **ทำจริงทันที**
-
-### 3. Storage Layer
-
-หน้าที่:
-
-- เก็บ snapshot
-- เก็บ media/event ที่จำเป็น
-- เปิดทางให้ต่อ event logger ทีหลัง
-
-สถานะ:
-
-- **ทำจริงแบบเบา ๆ**
-
-## Layer ที่ควรตามมาทีหลัง
-
-### Registry Layer
-
-- เก็บ person/vehicle metadata
-- ใช้เป็นฐานของ known / unknown
-
-### Identity Layer
-
-- รู้ว่าเป็นใคร
-- เชื่อม attendance ได้
-- ใน local pilot ควรเปิดเป็น optional service/profile แยกจาก detection stack หลัก
-
-### Vehicle / LPR Layer
-
-- อ่านป้ายทะเบียน
-- ผูกกับ vehicle registry
-
-### Access-control / Guest-mapping Layer
-
-- ใช้สำหรับ office, hotel, factory use case
+| Module | Answers | Implementation |
+|--------|---------|----------------|
+| **Detection & Tracking** | What is visible? | Frigate (YOLO/SSD on CPU/TPU) |
+| **Face Identification** | Who is it? | CompreFace REST API |
+| **Action Recognition** | What are they doing? | MediaPipe Pose → skeleton classifier |
+| **Vehicle / LPR** | What vehicle/plate? | Frigate labels + future plate OCR |
+| **Rules / Alerts** | Should we notify? | Engine alert rules + cooldown |
+| **Storage / Timeline** | When did it happen? | SQLite + event log |
+| **Notifications** | Notify who? | LINE Notify / Telegram / Webhook |
 
 ## หลักการออกแบบ
 
-- MVP ต้องใช้งานง่ายก่อน
-- config ต้องแก้ได้ด้วยไฟล์ ไม่ hardcode
-- หลีกเลี่ยงการบังคับ accelerator ตั้งแต่วันแรก
-- แยก detection ออกจาก identity และ business rule
-- ไม่เก็บ secret ใน repo
+- **MVP ก่อน** — ทำให้ใช้ได้จริงก่อนค่อยขยาย
+- **Config-driven** — ใช้ .env และ YAML, ไม่ hardcode
+- **Modular** — แต่ละ service แยกกัน, สื่อสารผ่าน MQTT/HTTP
+- **Local-first** — ทำงานได้โดยไม่ต้อง cloud
+- **Upgrade-friendly** — เปลี่ยน detector, เพิ่ม GPU/NPU ได้ภายหลัง
 
-## Data flow ที่แนะนำเมื่อระบบโตขึ้น
+## Supported Hardware
 
-```text
-RTSP Camera
-  -> Frigate
-  -> Event Normalizer
-  -> Registry Lookup
-  -> Alert Rule
-  -> Notifier
-  -> Event Store
-```
-
-แต่ flow นี้ยังเป็น **phase ถัดไป** ไม่ใช่สิ่งที่ต้องทำให้ครบในรอบแรก
+- **Intel N100/N305** + iGPU + Coral USB TPU
+- **NVIDIA Jetson** (Nano, Xavier NX, Orin Nano)
+- **Any x86/ARM64** ที่รัน Docker ได้
+- Windows (Docker Desktop + WSL2) สำหรับ dev
